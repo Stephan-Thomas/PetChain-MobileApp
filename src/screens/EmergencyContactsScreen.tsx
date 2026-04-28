@@ -17,6 +17,8 @@ import emergencyService, {
   type VetClinic,
 } from "../services/emergencyService";
 import SOSButton from "../components/SOSButton";
+import EmergencyCallButton from "../components/EmergencyCallButton";
+import PetSelectorBar from "../components/PetSelectorBar";
 import { useSecureScreen } from "../utils/secureScreen";
 import { formatWeight, formatAddress } from "../utils/localeValues";
 
@@ -157,13 +159,13 @@ const EmergencyContactsScreen: React.FC = () => {
           ) : null}
         </View>
         <View style={styles.cardActions}>
-          <TouchableOpacity
-            style={[styles.actionBtn, styles.callBtn]}
-            onPress={() => emergencyService.callContact(item.phoneNumber)}
-            accessibilityLabel={`Call ${item.name}`}
-          >
-            <Text style={styles.actionBtnText}>📞</Text>
-          </TouchableOpacity>
+          {/* Direct call button — Issue #144/#75 */}
+          <EmergencyCallButton
+            phoneNumber={item.phoneNumber}
+            label={item.name}
+            compact
+            skipConfirm={item.available24h} // skip confirm for 24h emergency contacts
+          />
           <TouchableOpacity
             style={[styles.actionBtn, styles.editBtn]}
             onPress={() => openEditModal(item)}
@@ -198,13 +200,13 @@ const EmergencyContactsScreen: React.FC = () => {
           <Text style={styles.cardSub}>{item.address}</Text>
         </View>
         <View style={styles.cardActions}>
-          <TouchableOpacity
-            style={[styles.actionBtn, styles.callBtn]}
-            onPress={() => emergencyService.callContact(item.phoneNumber)}
-            accessibilityLabel={`Call ${item.name}`}
-          >
-            <Text style={styles.actionBtnText}>📞</Text>
-          </TouchableOpacity>
+          {/* Direct call button — Issue #144/#75 */}
+          <EmergencyCallButton
+            phoneNumber={item.phoneNumber}
+            label={item.name}
+            compact
+            skipConfirm={item.available24h}
+          />
           <TouchableOpacity
             style={[styles.actionBtn, styles.navBtn]}
             onPress={() => emergencyService.navigateToClinic(item.address)}
@@ -220,6 +222,9 @@ const EmergencyContactsScreen: React.FC = () => {
   return (
     <View style={styles.container}>
       <SOSButton onSOSSent={handleSOSSent} />
+
+      {/* Pet selector — Issue #151/#82: switch between pets */}
+      <PetSelectorBar />
 
       <View style={styles.tabs}>
         <TouchableOpacity

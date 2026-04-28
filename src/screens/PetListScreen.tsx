@@ -12,7 +12,10 @@ import { HeaderOfflineStatus, useOfflineStatus } from '../components/OfflineIndi
 import { OptimizedImage } from '../components/OptimizedImage';
 import { RetryError } from '../components/RetryError';
 import SOSButton from '../components/SOSButton';
+import PetSelectorBar from '../components/PetSelectorBar';
+import PetAggregateView from '../components/PetAggregateView';
 import petService, { type Pet } from '../services/petService';
+import { usePetContext } from '../context/PetContext';
 import { useRetry } from '../utils/useRetry';
 
 interface Props {
@@ -23,6 +26,7 @@ interface Props {
 const PetListScreen: React.FC<Props> = ({ onSelectPet, onAddPet }) => {
   const [pets, setPets] = useState<Pet[]>([]);
   const offlineStatus = useOfflineStatus();
+  const { refreshPets } = usePetContext();
 
   const loadPets = useCallback(async () => {
     const data = await petService.getAllPets();
@@ -103,11 +107,18 @@ const PetListScreen: React.FC<Props> = ({ onSelectPet, onAddPet }) => {
           <Text style={styles.addBtnText}>+ Add</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Pet selector bar — Issue #151/#82 */}
+      <PetSelectorBar onAddPet={onAddPet} />
+
       {!offlineStatus?.isOnline ? (
         <View style={styles.cachedBanner}>
           <Text style={styles.cachedBannerText}>Showing cached pets while offline.</Text>
         </View>
       ) : null}
+
+      {/* Aggregate view — Issue #151/#82 */}
+      <PetAggregateView onSelectPet={onSelectPet} />
 
       {retryState.error ? (
         <RetryError
@@ -133,8 +144,8 @@ const PetListScreen: React.FC<Props> = ({ onSelectPet, onAddPet }) => {
               No pets yet. Add one!
             </Text>
           }
-          onRefresh={load}
-          refreshing={loading}
+          onRefresh={() => { void execute(); void refreshPets(); }}
+          refreshing={retryState.loading}
           removeClippedSubviews
           maxToRenderPerBatch={10}
           windowSize={5}

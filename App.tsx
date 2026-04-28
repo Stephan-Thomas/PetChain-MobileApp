@@ -5,6 +5,7 @@ import './src/i18n';
 import OfflineIndicator from './src/components/OfflineIndicator';
 import { useSplashGuard } from './src/components/SplashGuard';
 import AppNavigator from './src/navigation';
+import { PetProvider } from './src/context/PetContext';
 
 export default function App() {
   const { appReady } = useSplashGuard();
@@ -13,10 +14,12 @@ export default function App() {
   if (!appReady) return <View style={styles.root} />;
 
   return (
-    <View style={styles.root}>
-      <OfflineIndicator />
-      <AppNavigator />
-    </View>
+    <PetProvider>
+      <View style={styles.root}>
+        <OfflineIndicator />
+        <AppNavigator />
+      </View>
+    </PetProvider>
   );
 }
 
