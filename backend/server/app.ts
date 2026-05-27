@@ -11,12 +11,16 @@ import communityRouter from './routes/community';
 import docsRouter from './routes/docs';
 import emergencyRouter from './routes/emergency';
 import importRouter from './routes/import';
+import insuranceRouter from './routes/insurance';
 import medicalRecordsRouter from './routes/medicalRecords';
 import medicationsRouter from './routes/medications';
 import paymentsRouter from './routes/payments';
 import petsRouter from './routes/pets';
+import privacyRouter from './routes/privacy';
+import searchRouter from './routes/search';
 import syncRouter from './routes/sync';
 import usersRouter from './routes/users';
+import vetsRouter from './routes/vets';
 import { attachAudit } from '../middleware/auditLog';
 
 export function createApp(): Express {
@@ -46,6 +50,10 @@ export function createApp(): Express {
   api.use('/emergency', emergencyRouter);
   api.use('/community', communityRouter);
   api.use('/sync', syncRouter);
+  api.use('/vets', vetsRouter);
+  api.use('/privacy', privacyRouter);
+  api.use('/insurance', insuranceRouter);
+  api.use('/search', searchRouter);
 
   app.use('/api', api);
 
