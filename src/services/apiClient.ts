@@ -8,6 +8,7 @@ import axios, {
 import config from '../config';
 import { setupInterceptors } from '../middleware/apiInterceptors';
 import { logError } from '../utils/errorLogger';
+import performance, { recordApiTiming, startSpan, finishSpan } from '../utils/performance';
 
 // --- Circuit Breaker ---
 type CircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
@@ -107,7 +108,19 @@ export async function resilientRequest<T>(
     try {
       if (attempt > 0) await delay(attempt - 1);
 
+      const span = startSpan(`http ${requestConfig.method ?? 'request'} ${requestConfig.url}`);
+      const started = Date.now();
       const response = await apiClient.request<T>(requestConfig);
+      const duration = Date.now() - started;
+
+      // record timings
+      try {
+        recordApiTiming(requestConfig.url, requestConfig.method, duration, response.status);
+      } catch (e) {
+        // ignore metric errors
+      }
+
+      finishSpan(span);
 
       recordSuccess();
       return response;
