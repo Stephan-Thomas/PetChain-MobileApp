@@ -1,4 +1,4 @@
-name: CI
+name: CI — Lint, Typecheck & Tests
 
 on:
   push:
@@ -6,38 +6,64 @@ on:
   pull_request:
     branches: [main, master, develop]
 
-jobs:
-  lint:
-    name: Lint & Typecheck
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
-      - uses: actions/setup-node@v4
+jobs:
+  # ─── Quality gates (lint + format + types) ────────────────────────────────
+  quality:
+    name: Lint, Format & Typecheck
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
 
-      - run: npm ci
+      - name: Install dependencies
+        run: npm ci
 
       - name: Lint
         run: npm run lint
 
+      - name: Check formatting (Prettier)
+        run: npm run format:check
+
       - name: Typecheck
         run: npm run typecheck
 
+  # ─── Unit + Integration tests ─────────────────────────────────────────────
   test:
-    name: Test
+    name: Unit & Integration Tests
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+    needs: quality
 
-      - uses: actions/setup-node@v4
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
 
-      - run: npm ci
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Run tests
+      - name: Run tests with coverage
         run: npm run test:ci
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 14
