@@ -2,6 +2,7 @@ import cors from 'cors';
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 
 import { errBody } from './response';
+import { applySecurityHeaders } from '../middleware/securityHeaders';
 import { sanitizeInputs } from '../middleware/sanitize';
 import analyticsRouter from './routes/analytics';
 import appointmentsRouter from './routes/appointments';
@@ -25,6 +26,10 @@ import { attachAudit } from '../middleware/auditLog';
 
 export function createApp(): Express {
   const app = express();
+
+  // Security headers (Helmet + CSP + HSTS) — applied before any routes
+  applySecurityHeaders(app);
+
   app.use(cors());
   app.use(express.json());
   app.use(sanitizeInputs);
