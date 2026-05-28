@@ -15,6 +15,13 @@ export interface StoredUser {
   isEmailVerified: boolean;
   lastLoginAt?: string;
   passwordHash?: string;
+  // 2FA fields
+  twoFactorEnabled: boolean;
+  twoFactorSecret?: string; // encrypted TOTP secret (never exposed in API)
+  twoFactorBackupCodes?: string[]; // bcrypt-hashed backup codes
+  twoFactorPendingSecret?: string; // secret during setup (before confirmation)
+  recoveryToken?: string; // bcrypt-hashed recovery token
+  recoveryTokenExpiresAt?: number; // epoch ms
 }
 
 export interface StoredPet {
@@ -138,6 +145,7 @@ function seed() {
     updatedAt: t,
     isEmailVerified: true,
     lastLoginAt: t,
+    twoFactorEnabled: false,
   });
 
   const pets = new Map<string, StoredPet>();

@@ -2,16 +2,15 @@ import cors from 'cors';
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 
 import { errBody } from './response';
-import { createRedisSessionMiddleware } from '../middleware/redisSession';
-import { sanitizeInputs } from '../middleware/sanitize';
 import { applySecurityHeaders } from '../middleware/securityHeaders';
+import { sanitizeInputs } from '../middleware/sanitize';
+import { createRedisSessionMiddleware } from '../middleware/redisSession';
+import authRouter from './routes/auth';
 import analyticsRouter from './routes/analytics';
-import performanceLogger from '../middleware/performanceLogger';
 import appointmentsRouter from './routes/appointments';
 import auditLogsRouter from './routes/auditLogs';
 import backupsRouter from './routes/backups';
 import communityRouter from './routes/community';
-import forumRouter from './routes/forum';
 import docsRouter from './routes/docs';
 import emergencyRouter from './routes/emergency';
 import importRouter from './routes/import';
@@ -20,10 +19,10 @@ import medicalRecordsRouter from './routes/medicalRecords';
 import medicationsRouter from './routes/medications';
 import paymentsRouter from './routes/payments';
 import petsRouter from './routes/pets';
+import photosRouter from './routes/photos';
 import privacyRouter from './routes/privacy';
 import searchRouter from './routes/search';
 import syncRouter from './routes/sync';
-import telemedicineRouter from './routes/telemedicine';
 import usersRouter from './routes/users';
 import vetsRouter from './routes/vets';
 import { attachAudit } from '../middleware/auditLog';
@@ -43,8 +42,6 @@ export function createApp(): Express {
   app.use(cors());
   app.use(express.json());
   app.use(sanitizeInputs);
-  // performance logging middleware (Sentry)
-  app.use(performanceLogger);
   app.use(createRedisSessionMiddleware());
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   app.use(attachAudit as any);
@@ -70,13 +67,13 @@ export function createApp(): Express {
   });
 
   // --- Application routes ------------------------------------------------
+  api.use('/auth', authRouter);
   api.use('/analytics', analyticsRouter);
   api.use('/backups', backupsRouter);
   api.use('/users', usersRouter);
   api.use('/pets', petsRouter);
   api.use('/medical-records', medicalRecordsRouter);
   api.use('/appointments', appointmentsRouter);
-  api.use('/telemedicine', telemedicineRouter);
   api.use('/medications', medicationsRouter);
   api.use('/import', importRouter);
   api.use('/payments', paymentsRouter);
@@ -84,7 +81,6 @@ export function createApp(): Express {
   api.use('/docs', docsRouter);
   api.use('/emergency', emergencyRouter);
   api.use('/community', communityRouter);
-  api.use('/forum', forumRouter);
   api.use('/photos', photosRouter);
   api.use('/sync', syncRouter);
   api.use('/vets', vetsRouter);
