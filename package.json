@@ -106,6 +106,8 @@
     "@urql/core": "^5.0.0",
     "axios": "^1.15.2",
     "crypto-js": "^4.2.0",
+    "bip39": "^3.0.4",
+    "secrets.js-grempe": "^1.1.0",
     "expo-barcode-scanner": "^13.0.1",
     "expo-image-manipulator": "^13.0.6",
     "expo-camera": "^55.0.16",
