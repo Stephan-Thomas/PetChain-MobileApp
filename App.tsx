@@ -8,7 +8,7 @@ import { useSplashGuard } from './src/components/SplashGuard';
 import UpdatePrompt from './src/components/UpdatePrompt';
 import { PetProvider } from './src/context/PetContext';
 import AppNavigator from './src/navigation/AppNavigator';
-import crashReporting from './src/services/crashReporting';
+import errorTracking from './src/services/errorTracking';
 import {
   registerNotificationActions,
   watchNotificationActions,
@@ -16,7 +16,7 @@ import {
 import updateService from './src/services/updateService';
 
 // Initialise Sentry before the first render
-crashReporting.init();
+errorTracking.init();
 
 function App() {
   const { appReady } = useSplashGuard();
@@ -54,19 +54,24 @@ function App() {
   if (!appReady) return <View style={styles.root} />;
 
   return (
-    <PetProvider>
-      <View style={styles.root}>
-        <OfflineIndicator />
-        <AppNavigator />
-        <UpdatePrompt
-          visible={updateStatus.visible}
-          variant={updateStatus.visible ? updateStatus.variant : 'optional'}
-          storeUrl={updateStatus.visible ? updateStatus.storeUrl : undefined}
-          onUpdate={handleUpdate}
-          onDismiss={handleDismiss}
-        />
-      </View>
-    </PetProvider>
+    <Sentry.ErrorBoundary
+      fallback={<View style={styles.root} />}
+      onError={(error) => errorTracking.captureException(error, { source: 'ErrorBoundary' })}
+    >
+      <PetProvider>
+        <View style={styles.root}>
+          <OfflineIndicator />
+          <AppNavigator />
+          <UpdatePrompt
+            visible={updateStatus.visible}
+            variant={updateStatus.visible ? updateStatus.variant : 'optional'}
+            storeUrl={updateStatus.visible ? updateStatus.storeUrl : undefined}
+            onUpdate={handleUpdate}
+            onDismiss={handleDismiss}
+          />
+        </View>
+      </PetProvider>
+    </Sentry.ErrorBoundary>
   );
 }
 

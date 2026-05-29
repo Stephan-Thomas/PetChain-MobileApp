@@ -70,6 +70,7 @@
       "json"
     ],
     "moduleNameMapper": {
+      "^@sentry/react-native$": "<rootDir>/src/__mocks__/@sentry/react-native.ts",
       "^react-native$": "<rootDir>/src/__mocks__/react-native.ts",
       "^react-native-keychain$": "<rootDir>/src/__mocks__/react-native-keychain.ts",
       "^react-native-image-picker$": "<rootDir>/src/__mocks__/react-native-image-picker.ts",
