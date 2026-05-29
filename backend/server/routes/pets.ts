@@ -11,6 +11,7 @@ import {
 } from '../../middleware/cacheMiddleware';
 import { UserRole } from '../../models/UserRole';
 import { invalidatePet } from '../../services/cacheService';
+import paymentService from '../../services/paymentService';
 import { issuePetAsset, transferPetAsset } from '../../services/stellarAssetService';
 import { petRepository } from '../../src/repositories/petRepository';
 import { type DBPet } from '../../src/repositories/petRepository';
@@ -286,6 +287,21 @@ router.post('/', async (req: AuthenticatedRequest, res) => {
     );
   }
 
+  // Enforce free-tier pet limit (1 pet)
+  const activeSub = paymentService.getSubscription(ownerId.trim());
+  const isPremium = activeSub?.status === 'active' && activeSub.plan !== 'free';
+  if (!isPremium && req.user!.role !== UserRole.ADMIN) {
+    const existingPets = [...store.pets.values()].filter((p) => p.ownerId === ownerId.trim());
+    if (existingPets.length >= 1) {
+      return sendError(
+        res,
+        403,
+        'SUBSCRIPTION_REQUIRED',
+        'Free tier allows 1 pet. Upgrade to Premium for unlimited pets.',
+      );
+    }
+  }
+
   if (!store.users.get(ownerId.trim())) {
     return sendError(res, 400, 'VALIDATION_ERROR', 'ownerId must reference an existing user');
   }
@@ -314,6 +330,7 @@ router.post('/', async (req: AuthenticatedRequest, res) => {
   });
 
   await invalidatePet(pet.id, pet.owner_id);
+
   // Issue Stellar pet identity NFT
   try {
     const sourceSeed = process.env.STELLAR_SOURCE_SEED;
@@ -394,7 +411,6 @@ router.put('/:id', async (req: AuthenticatedRequest, res) => {
     before: pet,
     after: next,
   });
-  return res.json(ok(toPetResponse(next), 'Pet updated'));
   return res.json(ok(await toPetResponse(next), 'Pet updated'));
 });
 

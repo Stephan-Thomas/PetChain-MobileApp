@@ -9,7 +9,7 @@ const prettierPlugin = require('eslint-plugin-prettier');
 module.exports = tseslint.config(
   // ── Global ignores ────────────────────────────────────────────────────────
   {
-    ignores: ['node_modules/**', 'dist/**', 'coverage/**', 'eslint.config.js', 'babel.config.cjs'],
+    ignores: ['node_modules/**', 'dist/**', 'coverage/**', 'eslint.config.js', 'babel.config.cjs', 'jest.config.js'],
   },
 
   // ── Base JS rules ─────────────────────────────────────────────────────────

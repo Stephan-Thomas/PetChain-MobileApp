@@ -190,17 +190,15 @@ const PetDetailScreen: React.FC<Props> = ({
           <Text style={styles.healthBtnText}>Health Dashboard</Text>
         </TouchableOpacity>
 
-        {onAuditHistory && (
-          <TouchableOpacity
-            style={styles.auditBtn}
-            onPress={() => onAuditHistory(petId, pet.name)}
-            accessibilityRole="button"
-            accessibilityLabel="Audit history"
-            accessibilityHint="View change history for this pet record"
-          >
-            <Text style={styles.auditBtnText}>Audit History</Text>
-          </TouchableOpacity>
-        )}
+        <TouchableOpacity
+          style={styles.profileBtn}
+          onPress={() => onViewProfile(petId, pet.name)}
+          accessibilityRole="button"
+          accessibilityLabel="View pet profile"
+          accessibilityHint="View breed profile and personalized care recommendations"
+        >
+          <Text style={styles.profileBtnText}>View Breed Profile</Text>
+        </TouchableOpacity>
 
         {onViewProfile && (
           <TouchableOpacity
@@ -356,14 +354,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   healthBtnText: { color: '#1565c0', fontWeight: '700', fontSize: 15 },
-  auditBtn: {
-    backgroundColor: '#fff3e0',
-    borderRadius: 10,
-    padding: 14,
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  auditBtnText: { color: '#ef6c00', fontWeight: '700', fontSize: 15 },
   deleteBtn: {
     backgroundColor: '#fdecea',
     borderRadius: 10,
