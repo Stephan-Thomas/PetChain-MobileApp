@@ -10,11 +10,13 @@ module.exports = {
     '^react-native-keychain$': '<rootDir>/src/__mocks__/react-native-keychain.ts',
     '^react-native-image-picker$': '<rootDir>/src/__mocks__/react-native-image-picker.ts',
     '^react-native-image-resizer$': '<rootDir>/src/__mocks__/react-native-image-resizer.ts',
-    '^@react-native-community/netinfo$': '<rootDir>/src/__mocks__/@react-native-community/netinfo.ts',
+    '^@react-native-community/netinfo$':
+      '<rootDir>/src/__mocks__/@react-native-community/netinfo.ts',
     '^expo-constants$': '<rootDir>/src/__mocks__/expo-constants.ts',
     '^expo-sqlite$': '<rootDir>/src/__mocks__/expo-sqlite.ts',
     '^expo-notifications$': '<rootDir>/src/__mocks__/expo-notifications.ts',
     '^expo-secure-store$': '<rootDir>/src/__mocks__/expo-secure-store.ts',
+    '^expo-in-app-purchases$': '<rootDir>/src/__mocks__/expo-in-app-purchases.ts',
   },
   collectCoverageFrom: [
     'src/**/*.ts',

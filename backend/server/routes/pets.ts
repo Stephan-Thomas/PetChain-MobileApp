@@ -3,6 +3,7 @@ import crypto from 'crypto';
 
 import express from 'express';
 
+import { logAuditTrail } from '../../middleware/auditLogger';
 import { authenticateJWT, type AuthenticatedRequest } from '../../middleware/auth';
 import {
   petProfileCacheMiddleware,
@@ -10,11 +11,11 @@ import {
 } from '../../middleware/cacheMiddleware';
 import { UserRole } from '../../models/UserRole';
 import { invalidatePet } from '../../services/cacheService';
+import paymentService from '../../services/paymentService';
 import { issuePetAsset, transferPetAsset } from '../../services/stellarAssetService';
 import { petRepository } from '../../src/repositories/petRepository';
 import { type DBPet } from '../../src/repositories/petRepository';
 import { userRepository } from '../../src/repositories/userRepository';
-import { logAuditTrail } from '../../middleware/auditLogger';
 import { ok, sendError } from '../response';
 import { type StoredMedicalRecord, type StoredPet, store } from '../store';
 
@@ -284,6 +285,21 @@ router.post('/', async (req: AuthenticatedRequest, res) => {
       'FORBIDDEN',
       'You do not have permission to create a pet for this owner',
     );
+  }
+
+  // Enforce free-tier pet limit (1 pet)
+  const activeSub = paymentService.getSubscription(ownerId.trim());
+  const isPremium = activeSub?.status === 'active' && activeSub.plan !== 'free';
+  if (!isPremium && req.user!.role !== UserRole.ADMIN) {
+    const existingPets = [...store.pets.values()].filter((p) => p.ownerId === ownerId.trim());
+    if (existingPets.length >= 1) {
+      return sendError(
+        res,
+        403,
+        'SUBSCRIPTION_REQUIRED',
+        'Free tier allows 1 pet. Upgrade to Premium for unlimited pets.',
+      );
+    }
   }
 
   if (!store.users.get(ownerId.trim())) {
