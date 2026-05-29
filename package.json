@@ -39,6 +39,8 @@
     "format:check": "prettier --check .",
     "e2e:test": "maestro test .maestro/flows/smoke-test.yaml",
     "prepare": "husky",
+    "storybook": "STORYBOOK_ENABLED=true expo start",
+    "storybook:generate": "sb-rn-get-stories",
     "migrate": "ts-node backend/src/db/migrate.ts",
     "seed": "ts-node backend/seeds/index.ts",
     "seed:dev": "ts-node backend/seeds/index.ts --owners 5 --vets 3 --pets 2 --records 3 --appointments 2 --medications 1",

@@ -3,6 +3,7 @@ import React, { useEffect } from 'react';
 import { View, StyleSheet } from 'react-native';
 
 import './src/i18n';
+import StorybookUIRoot from './.storybook';
 import OfflineIndicator from './src/components/OfflineIndicator';
 import { useSplashGuard } from './src/components/SplashGuard';
 import UpdatePrompt from './src/components/UpdatePrompt';
@@ -14,6 +15,8 @@ import {
   watchNotificationActions,
 } from './src/services/notificationService';
 import updateService from './src/services/updateService';
+
+const isStorybookEnabled = process.env.STORYBOOK_ENABLED === 'true';
 
 // Initialise Sentry before the first render
 crashReporting.init();
@@ -74,5 +77,6 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
 });
 
-// Wrap with Sentry to capture unhandled JS exceptions and ANRs
-export default Sentry.wrap(App);
+const AppRoot = isStorybookEnabled ? StorybookUIRoot : Sentry.wrap(App);
+
+export default AppRoot;
