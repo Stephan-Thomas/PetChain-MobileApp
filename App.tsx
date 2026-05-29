@@ -1,6 +1,6 @@
 import * as Sentry from '@sentry/react-native';
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, AppState, type AppStateStatus } from 'react-native';
+import { View, StyleSheet, AppState, type AppStateStatus, I18nManager } from 'react-native';
 
 import './src/i18n';
 import StorybookUIRoot from './.storybook';
@@ -17,6 +17,7 @@ import {
   getLockTimeoutMs,
 } from './src/services/appLockService';
 import crashReporting from './src/services/crashReporting';
+import errorTracking from './src/services/errorTracking';
 import ErrorBoundary from './src/components/ErrorBoundary';
 import {
   registerNotificationActions,

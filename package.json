@@ -50,7 +50,8 @@
     "audit:high": "npm audit --audit-level=high",
     "audit:fix": "npm audit fix",
     "audit:fix:force": "npm audit fix --force",
-    "security:check": "npm run audit:high && npm run lint && npm run typecheck"
+    "security:check": "npm run audit:high && npm run lint && npm run typecheck",
+    "check:translations": "ts-node scripts/check-translations.ts"
   },
   "lint-staged": {
     "*.{ts,tsx,js,jsx}": [
@@ -64,7 +65,8 @@
   "jest": {
     "testEnvironment": "node",
     "testMatch": [
-      "**/__tests__/**/*.test.ts"
+      "**/__tests__/**/*.test.ts",
+      "**/__tests__/**/*.test.tsx"
     ],
     "transform": {
       "^.+\\.[jt]sx?$": "babel-jest"
@@ -87,7 +89,6 @@
       "^expo-sqlite$": "<rootDir>/src/__mocks__/expo-sqlite.ts",
       "^expo-notifications$": "<rootDir>/src/__mocks__/expo-notifications.ts",
       "^expo-secure-store$": "<rootDir>/src/__mocks__/expo-secure-store.ts",
-      "^@sentry/react-native$": "<rootDir>/src/__mocks__/@sentry/react-native.ts"
       "^pg$": "<rootDir>/src/__mocks__/pg.js",
       "^@elastic/elasticsearch$": "<rootDir>/src/__mocks__/@elastic/elasticsearch.js",
       "^socket\\.io$": "<rootDir>/src/__mocks__/socket.io.js",
@@ -116,8 +117,6 @@
     "@urql/core": "^5.0.0",
     "axios": "^1.15.2",
     "bcryptjs": "^2.4.3",
-    "@stellar/stellar-sdk": "^13.1.0",
-    "axios": "^1.13.5",
     "crypto-js": "^4.2.0",
     "bip39": "^3.0.4",
     "secrets.js-grempe": "^1.1.0",
@@ -125,6 +124,7 @@
     "expo-camera": "^55.0.16",
     "expo-constants": "^18.0.13",
     "expo-image-manipulator": "^13.0.6",
+    "expo-localization": "^16.0.1",
     "expo-notifications": "^0.31.1",
     "expo-screen-capture": "^55.0.13",
     "expo-secure-store": "^14.0.1",
@@ -141,19 +141,16 @@
     "otplib": "^12.0.1",
     "qrcode": "^1.5.4",
     "pdfkit": "0.15.1",
-    "qrcode": "1.5.4",
     "react-i18next": "^17.0.6",
     "react-native-image-picker": "^7.0.0",
     "react-native-image-resizer": "^1.4.5",
     "react-native-keychain": "^10.0.0",
     "react-native-ssl-pinning": "^1.5.3",
     "react-native-webrtc": "^124.0.3",
-    "helmet": "^8.0.0",
     "swagger-ui-express": "^5.0.1",
-    "tesseract.js": "^5.0.4"
-    "swagger-ui-express": "^5.0.1"
+    "tesseract.js": "^5.0.4",
     "winston": "3.17.0",
-    "winston-daily-rotate-file": "5.0.0"
+    "winston-daily-rotate-file": "5.0.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
@@ -182,10 +179,11 @@
     "@types/react-native": "^0.72.0",
     "@types/supertest": "^7.2.0",
     "@types/swagger-ui-express": "^4.1.8",
+    "@types/winston": "^2.4.4",
+    "@types/ws": "^8.5.14",
     "axios-mock-adapter": "^2.1.0",
     "babel-plugin-react-native-web": "^0.19.13",
     "babel-preset-expo": "^56.0.13",
-    "@types/ws": "^8.5.14",
     "eslint": "9.26.0",
     "eslint-plugin-import": "2.31.0",
     "eslint-plugin-prettier": "5.4.0",
@@ -198,11 +196,10 @@
     "prettier": "3.5.3",
     "supertest": "^7.2.2",
     "ts-jest": "^29.4.6",
+    "ts-node": "^10.9.2",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "8.59.0",
-    "vitest": "^4.1.5",
-    "@types/winston": "^2.4.4"
     "vitest": "^4.1.5"
   },
   "overrides": {
