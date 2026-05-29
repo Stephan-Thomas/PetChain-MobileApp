@@ -17,6 +17,13 @@ module.exports = {
     '^expo-notifications$': '<rootDir>/src/__mocks__/expo-notifications.ts',
     '^expo-secure-store$': '<rootDir>/src/__mocks__/expo-secure-store.ts',
     '^expo-in-app-purchases$': '<rootDir>/src/__mocks__/expo-in-app-purchases.ts',
+    '^@sentry/react-native$': '<rootDir>/src/__mocks__/@sentry/react-native.ts',
+    '^pg$': '<rootDir>/src/__mocks__/pg.js',
+    '^@elastic/elasticsearch$': '<rootDir>/src/__mocks__/@elastic/elasticsearch.js',
+    '^socket\\.io$': '<rootDir>/src/__mocks__/socket.io.js',
+    '^socket\\.io-client$': '<rootDir>/src/__mocks__/socket.io-client.js',
+    '^sharp$': '<rootDir>/src/__mocks__/sharp.js',
+    '^multer$': '<rootDir>/src/__mocks__/multer.js',
   },
   collectCoverageFrom: [
     'src/**/*.ts',

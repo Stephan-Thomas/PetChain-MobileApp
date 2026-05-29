@@ -15,7 +15,8 @@ interface Props {
   onEdit: (pet: Pet) => void;
   onHealthDashboard: (petId: string, petName: string) => void;
   onShare?: (petId: string, petName: string) => void;
-  onViewProfile: (petId: string, petName: string) => void;
+  onAuditHistory?: (petId: string, petName: string) => void;
+  onViewProfile?: (petId: string, petName: string) => void;
 }
 
 const PetDetailScreen: React.FC<Props> = ({
@@ -24,6 +25,7 @@ const PetDetailScreen: React.FC<Props> = ({
   onEdit,
   onHealthDashboard,
   onShare,
+  onAuditHistory,
   onViewProfile,
 }) => {
   useSecureScreen();
@@ -197,6 +199,18 @@ const PetDetailScreen: React.FC<Props> = ({
         >
           <Text style={styles.profileBtnText}>View Breed Profile</Text>
         </TouchableOpacity>
+
+        {onViewProfile && (
+          <TouchableOpacity
+            style={styles.profileBtn}
+            onPress={() => onViewProfile(petId, pet.name)}
+            accessibilityRole="button"
+            accessibilityLabel="View pet profile"
+            accessibilityHint="View breed profile and personalized care recommendations"
+          >
+            <Text style={styles.profileBtnText}>View Breed Profile</Text>
+          </TouchableOpacity>
+        )}
 
         {onShare && (
           <TouchableOpacity

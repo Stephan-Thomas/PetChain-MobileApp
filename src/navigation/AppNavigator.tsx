@@ -9,6 +9,7 @@ import type { RootStackParamList, MainTabParamList, PetStackParamList } from './
 import { DEEP_LINK_PREFIX } from './types';
 import type { Pet } from '../models/Pet';
 import AppointmentScreen from '../screens/AppointmentScreen';
+import AuditHistoryScreen from '../screens/AuditHistoryScreen';
 import AuthNavigator from '../screens/AuthNavigator';
 import CommunityScreen from '../screens/CommunityScreen';
 import DeleteAccountScreen from '../screens/DeleteAccountScreen';
@@ -26,12 +27,18 @@ import PetFormScreen from '../screens/PetFormScreen';
 import PetHealthDashboardScreen from '../screens/PetHealthDashboardScreen';
 import PetHealthMetricsScreen from '../screens/PetHealthMetricsScreen';
 import PetListScreen from '../screens/PetListScreen';
+import PetProfileScreen from '../screens/PetProfileScreen';
 import PetShareScreen from '../screens/PetShareScreen';
+import TravelCertificateScreen from '../screens/TravelCertificateScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import ReconciliationScreen from '../screens/ReconciliationScreen';
 import QRScannerScreen from '../screens/QRScannerScreen';
+import VaccinationScreen from '../screens/VaccinationScreen';
+import TelemedicineScreen from '../screens/TelemedicineScreen';
 import ForumScreen from '../screens/ForumScreen';
+import FiatOnRampScreen from '../screens/FiatOnRampScreen';
 import analyticsService from '../services/analyticsService';
+import performance from '../utils/performance';
 
 const RootStack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -59,7 +66,30 @@ function PetNavigator() {
               navigation.navigate('PetHealthDashboard', { petId, petName })
             }
             onShare={(petId, petName) => navigation.navigate('PetShare', { petId, petName })}
+            onAuditHistory={(petId, petName) =>
+              navigation.navigate('AuditHistory', {
+                entityType: 'pet',
+                entityId: petId,
+                title: `${petName} • Audit`,
+              })
+            }
+            onViewProfile={(petId) => navigation.navigate('PetProfile', { petId })}
           />
+        )}
+      </PetStack.Screen>
+      <PetStack.Screen name="AuditHistory" options={{ title: 'Audit History' }}>
+        {({ route, navigation }) => (
+          <AuditHistoryScreen
+            entityType={route.params.entityType}
+            entityId={route.params.entityId}
+            title={route.params.title}
+            onBack={() => navigation.goBack()}
+          />
+        )}
+      </PetStack.Screen>
+      <PetStack.Screen name="PetProfile" options={{ title: 'Pet Profile' }}>
+        {({ route, navigation }) => (
+          <PetProfileScreen petId={route.params.petId} onBack={() => navigation.goBack()} />
         )}
       </PetStack.Screen>
       <PetStack.Screen name="PetHealthDashboard" options={{ title: 'Health Dashboard' }}>
@@ -122,6 +152,15 @@ function PetNavigator() {
           />
         )}
       </PetStack.Screen>
+      <PetStack.Screen name="TravelCertificate" options={{ title: 'Travel Health Certificate' }}>
+        {({ route, navigation }) => (
+          <TravelCertificateScreen
+            petId={route.params.petId}
+            petName={route.params.petName}
+            onBack={() => navigation.goBack()}
+          />
+        )}
+      </PetStack.Screen>
       <PetStack.Screen name="NearbyVet" options={{ title: 'Nearby Vet Clinics' }}>
         {({ navigation }) => <NearbyVetScreen onBack={() => navigation.goBack()} />}
       </PetStack.Screen>
@@ -170,6 +209,16 @@ function MainTabs() {
         component={AppointmentScreen}
         options={{ title: 'Appointments' }}
       />
+      <Tab.Screen
+        name="Vaccinations"
+        component={VaccinationScreen}
+        options={{ title: 'Vaccinations' }}
+      />
+      <Tab.Screen
+        name="Telemedicine"
+        component={TelemedicineScreen}
+        options={{ title: 'Telemedicine' }}
+      />
       <Tab.Screen name="Community" component={CommunityScreen} options={{ title: 'Community' }} />
       <Tab.Screen
         name="Emergency"
@@ -194,6 +243,7 @@ const linking: LinkingOptions<RootStackParamList> = {
             screens: {
               PetListScreen: 'pets',
               PetDetail: 'pets/:petId',
+              PetProfile: 'pets/:petId/profile',
               PetHealthDashboard: 'pets/:petId/dashboard',
               PetHealthMetrics: 'pets/:petId/health',
               PetForm: 'pets/form/:petId?',
@@ -203,6 +253,7 @@ const linking: LinkingOptions<RootStackParamList> = {
           },
           Medications: 'medications',
           Appointments: 'appointments',
+          Vaccinations: 'vaccinations',
           Community: 'community',
           Emergency: 'emergency',
           Profile: 'profile',
@@ -224,6 +275,7 @@ export default function AppNavigator() {
   >(null);
 
   const navTheme = useNavigationTheme();
+  const currentScreenSpan = React.useRef<ReturnType<typeof performance.startSpan> | undefined>();
 
   return (
     <>
@@ -239,7 +291,20 @@ export default function AppNavigator() {
           const route = (
             navRef.current as { getCurrentRoute?: () => { name?: string } | undefined } | null
           )?.getCurrentRoute?.();
-          if (route?.name) analyticsService.screenView(route.name);
+          const name = route?.name;
+          // finish previous span
+          try {
+            performance.finishSpan(currentScreenSpan.current);
+          } catch (e) {
+            // ignore
+          }
+
+          if (name) {
+            analyticsService.screenView(name);
+            // start new screen span
+            currentScreenSpan.current = performance.startSpan(`screen:${name}`);
+            performance.recordMetric('screen.render_start', Date.now(), { screen: name });
+          }
         }}
       >
         <RootStack.Navigator screenOptions={{ headerShown: false }}>
@@ -288,6 +353,11 @@ export default function AppNavigator() {
               name="Payment"
               component={PaymentScreen}
               options={{ headerShown: true, title: 'Premium Plans' }}
+            />
+            <RootStack.Screen
+              name="FiatOnRamp"
+              component={FiatOnRampScreen}
+              options={{ headerShown: true, title: 'Fund Your Wallet' }}
             />
           </RootStack.Group>
         </RootStack.Navigator>
