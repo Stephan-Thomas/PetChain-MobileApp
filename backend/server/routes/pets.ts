@@ -11,6 +11,7 @@ import {
 } from '../../middleware/cacheMiddleware';
 import { UserRole } from '../../models/UserRole';
 import { invalidatePet } from '../../services/cacheService';
+import { issuePetAsset, transferPetAsset } from '../../services/stellarAssetService';
 import { petRepository } from '../../src/repositories/petRepository';
 import { type DBPet } from '../../src/repositories/petRepository';
 import { userRepository } from '../../src/repositories/userRepository';
@@ -313,10 +314,20 @@ router.post('/', async (req: AuthenticatedRequest, res) => {
   });
 
   await invalidatePet(pet.id, pet.owner_id);
+  // Issue Stellar pet identity NFT
+  try {
+    const sourceSeed = process.env.STELLAR_SOURCE_SEED;
+    const issuerSeed = process.env.STELLAR_ISSUER_SEED;
+    if (sourceSeed && issuerSeed) {
+      await issuePetAsset(pet.id, sourceSeed, issuerSeed);
+    }
+  } catch (err) {
+    console.error('[Stellar] Failed to issue pet asset:', err);
+  }
   return res.status(201).json(ok(await toPetResponse(pet), 'Pet created'));
 });
 
-router.put('/:id', (req: AuthenticatedRequest, res) => {
+router.put('/:id', async (req: AuthenticatedRequest, res) => {
   const pet = store.pets.get(req.params.id);
   if (!pet) return sendError(res, 404, 'NOT_FOUND', 'Pet not found');
 
@@ -358,6 +369,21 @@ router.put('/:id', (req: AuthenticatedRequest, res) => {
   ) {
     const previous = activeQrForPet(pet.id);
     if (previous) store.petQrIdentities.set(previous.token, { ...previous, revokedAt: t });
+
+    // Transfer Stellar pet identity NFT to new owner
+    try {
+      const assetCode = `PET${pet.id.substring(0, 9).toUpperCase()}`;
+      const issuerPublicKey = process.env.STELLAR_ISSUER_PUBLIC_KEY;
+      const currentOwnerSeed = process.env.STELLAR_SOURCE_SEED;
+      const newOwnerUser = await userRepository.findById(body.ownerId);
+      const newOwnerPublicKey = newOwnerUser?.stellarPublicKey; // Assuming user model has this field
+
+      if (issuerPublicKey && currentOwnerSeed && newOwnerPublicKey) {
+        await transferPetAsset(assetCode, issuerPublicKey, currentOwnerSeed, newOwnerPublicKey);
+      }
+    } catch (err) {
+      console.error('[Stellar] Failed to transfer pet asset:', err);
+    }
   }
   store.pets.set(pet.id, next);
   void logAuditTrail({
@@ -369,6 +395,7 @@ router.put('/:id', (req: AuthenticatedRequest, res) => {
     after: next,
   });
   return res.json(ok(toPetResponse(next), 'Pet updated'));
+  return res.json(ok(await toPetResponse(next), 'Pet updated'));
 });
 
 router.delete('/:id', (req: AuthenticatedRequest, res) => {
