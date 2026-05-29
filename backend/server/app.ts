@@ -2,9 +2,9 @@ import cors from 'cors';
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 
 import { errBody } from './response';
-import { applySecurityHeaders } from '../middleware/securityHeaders';
-import { sanitizeInputs } from '../middleware/sanitize';
 import { createRedisSessionMiddleware } from '../middleware/redisSession';
+import { sanitizeInputs } from '../middleware/sanitize';
+import { applySecurityHeaders } from '../middleware/securityHeaders';
 import analyticsRouter from './routes/analytics';
 import appointmentsRouter from './routes/appointments';
 import auditLogsRouter from './routes/auditLogs';
@@ -25,6 +25,7 @@ import searchRouter from './routes/search';
 import syncRouter from './routes/sync';
 import usersRouter from './routes/users';
 import vetsRouter from './routes/vets';
+import vitalsRouter from './routes/vitals';
 import { attachAudit } from '../middleware/auditLog';
 
 // Readiness probe state — set to false while the process is draining
@@ -87,6 +88,7 @@ export function createApp(): Express {
   api.use('/privacy', privacyRouter);
   api.use('/insurance', insuranceRouter);
   api.use('/search', searchRouter);
+  api.use('/vitals', vitalsRouter);
 
   app.use('/api', api);
 
