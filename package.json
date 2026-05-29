@@ -127,6 +127,7 @@
     "expo-sqlite": "^15.0.6",
     "expo-updates": "^0.26.0",
     "express": "^5.2.1",
+    "ioredis": "^5.6.1",
     "graphql": "^16.0.0",
     "helmet": "^8.0.0",
     "i18next": "^26.0.8",

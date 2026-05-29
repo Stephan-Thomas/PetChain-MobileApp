@@ -2,12 +2,14 @@ import cors from 'cors';
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 
 import { errBody } from './response';
+import { getRedisClient } from '../config/redis';
 import { createRedisSessionMiddleware } from '../middleware/redisSession';
 import { sanitizeInputs } from '../middleware/sanitize';
 import { applySecurityHeaders } from '../middleware/securityHeaders';
 import authRouter from './routes/auth';
 import { requestLogger } from '../middleware/requestLogger';
 import logger from '../utils/logger';
+import { getCacheMetrics, warmCache } from '../services/cacheService';
 import analyticsRouter from './routes/analytics';
 import performanceLogger from '../middleware/performanceLogger';
 import appointmentsRouter from './routes/appointments';
@@ -62,6 +64,11 @@ export function createApp(): Express {
   app.use(attachAudit as any);
 
   const api = express.Router();
+
+  // --- Cache metrics (unauthenticated) ----------------------------------------
+  api.get('/cache/metrics', (_req, res) => {
+    res.json(getCacheMetrics());
+  });
 
   // --- Health & readiness probes (unauthenticated) -----------------------
   api.get('/health', (_req, res) => {
@@ -122,6 +129,12 @@ export function createApp(): Express {
   app.use((_req, res) => {
     res.status(404).json(errBody('NOT_FOUND', 'Route not found'));
   });
+
+  // Initiate Redis connection and warm the cache safely
+  getRedisClient()
+    .connect()
+    .catch(() => {});
+  warmCache().catch((err: any) => console.error('[app] warmCache failed:', err.message));
 
   return app;
 }
