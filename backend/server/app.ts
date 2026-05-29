@@ -5,6 +5,7 @@ import { errBody } from './response';
 import { createRedisSessionMiddleware } from '../middleware/redisSession';
 import { sanitizeInputs } from '../middleware/sanitize';
 import { applySecurityHeaders } from '../middleware/securityHeaders';
+import authRouter from './routes/auth';
 import analyticsRouter from './routes/analytics';
 import performanceLogger from '../middleware/performanceLogger';
 import appointmentsRouter from './routes/appointments';
@@ -76,6 +77,7 @@ export function createApp(): Express {
   });
 
   // --- Application routes ------------------------------------------------
+  api.use('/auth', authRouter);
   api.use('/analytics', analyticsRouter);
   api.use('/backups', backupsRouter);
   api.use('/users', usersRouter);

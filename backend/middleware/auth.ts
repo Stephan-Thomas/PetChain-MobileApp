@@ -2,7 +2,7 @@ import { type NextFunction, type Request, type Response } from 'express';
 import jwt from 'jsonwebtoken';
 
 import config from '../config';
-import { type UserRole } from '../models/UserRole';
+import { UserRole } from '../models/UserRole';
 import { sendError } from '../server/response';
 import { store } from '../server/store';
 
@@ -104,4 +104,24 @@ export const authorizeRoles = (...roles: UserRole[]) => {
 
     next();
   };
+};
+
+/**
+ * Middleware that enforces 2FA completion for admin accounts.
+ * Attach after authenticateJWT on any admin-only route.
+ */
+export const requireTwoFactor = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  if (!req.user) return sendError(res, 401, 'UNAUTHORIZED', 'Authentication required.');
+
+  const user = store.users.get(req.user.id);
+  if (user?.role === UserRole.ADMIN && !user.twoFactorEnabled) {
+    return sendError(
+      res,
+      403,
+      'TWO_FACTOR_REQUIRED',
+      'Admin accounts must have 2FA enabled. Please set up 2FA before proceeding.',
+    );
+  }
+
+  next();
 };
