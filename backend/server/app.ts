@@ -47,6 +47,7 @@ import appRouter from './routes/app';
 import { attachAudit } from '../middleware/auditLog';
 import anchorRouter from '../src/routes/anchor';
 import apiKeysRouter from '../src/routes/apiKeys';
+import documentsRouter from '../src/routes/documents';
 import familySharingRouter from './routes/familySharing';
 import federationRouter from '../src/routes/federation';
 import integrationsRouter from '../src/routes/integrations';
@@ -157,6 +158,7 @@ export function createApp(): Express {
   api.use('/app', appRouter);
   api.use('/api-keys', apiKeysRouter);
   api.use('/integrations', integrationsRouter);
+  api.use('/documents', dataRateLimiter, documentsRouter);
 
   app.use('/api', api);
 
