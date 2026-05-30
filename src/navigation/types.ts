@@ -23,6 +23,7 @@ export type MainTabParamList = {
   Appointments: undefined;
   Community: undefined;
   Emergency: undefined;
+  Notifications: undefined;
   Profile: undefined;
 };
 

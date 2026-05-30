@@ -2,11 +2,12 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { NavigationContainer, type LinkingOptions } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import React from 'react';
-import { StatusBar } from 'react-native';
+import { StatusBar, Text } from 'react-native';
 
 import { useNavigationTheme } from '../theme';
 import type { RootStackParamList, MainTabParamList, PetStackParamList } from './types';
 import { DEEP_LINK_PREFIX } from './types';
+import { useNotificationBadge } from '../hooks/useNotificationBadge';
 import type { Pet } from '../models/Pet';
 import AppointmentScreen from '../screens/AppointmentScreen';
 import AuthNavigator from '../screens/AuthNavigator';
@@ -18,6 +19,7 @@ import MedicalRecordSearchScreen from '../screens/MedicalRecordSearchScreen';
 import MedicalRecordViewerScreen from '../screens/MedicalRecordViewerScreen';
 import MedicationScreen from '../screens/MedicationScreen';
 import NearbyVetScreen from '../screens/NearbyVetScreen';
+import NotificationCenterScreen from '../screens/NotificationCenterScreen';
 import NotificationPreferencesScreen from '../screens/NotificationPreferencesScreen';
 import OnboardingScreen from '../screens/OnboardingScreen';
 import PaymentScreen from '../screens/PaymentScreen';
@@ -148,8 +150,17 @@ function PetNavigator() {
 
 // ─── Main Tabs ────────────────────────────────────────────────────────────────
 function MainTabs() {
+  const { count: badgeCount, refresh: refreshBadge } = useNotificationBadge();
+
   return (
-    <Tab.Navigator>
+    <Tab.Navigator
+      screenListeners={{
+        tabPress: () => {
+          // Refresh badge whenever any tab is pressed (covers returning from Notifications)
+          refreshBadge();
+        },
+      }}
+    >
       <Tab.Screen
         name="PetList"
         component={PetNavigator}
@@ -170,6 +181,24 @@ function MainTabs() {
         name="Emergency"
         component={EmergencyContactsScreen}
         options={{ title: 'Emergency' }}
+      />
+      <Tab.Screen
+        name="Notifications"
+        component={NotificationCenterScreen}
+        options={{
+          title: 'Notifications',
+          tabBarBadge: badgeCount > 0 ? badgeCount : undefined,
+          tabBarBadgeStyle: { backgroundColor: '#EF4444' },
+          tabBarIcon: ({ color, size }: { color: string; size: number }) => (
+            <Text style={{ fontSize: size, color }}>🔔</Text>
+          ),
+        }}
+        listeners={{
+          tabPress: () => {
+            // Refresh badge when navigating away from Notifications tab
+            refreshBadge();
+          },
+        }}
       />
       <Tab.Screen name="Profile" component={ProfileScreen} options={{ title: 'Profile' }} />
     </Tab.Navigator>
@@ -200,6 +229,7 @@ const linking: LinkingOptions<RootStackParamList> = {
           Appointments: 'appointments',
           Community: 'community',
           Emergency: 'emergency',
+          Notifications: 'notifications',
           Profile: 'profile',
         },
       },
