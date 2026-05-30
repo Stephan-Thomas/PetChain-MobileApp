@@ -72,9 +72,8 @@ class LoggerService {
     level: LogLevel,
     message: string,
     context?: Record<string, unknown>,
-    error?: Error
+    error?: Error,
   ): void {
-    // Check if this log level should be processed
     if (LOG_LEVELS[level] < LOG_LEVELS[this.config.level]) {
       return;
     }
@@ -87,10 +86,8 @@ class LoggerService {
       error,
     };
 
-    // Add to buffer
     this.addToBuffer(logEntry);
 
-    // Output to console if enabled
     if (this.config.enableConsole) {
       this.logToConsole(logEntry);
     }
@@ -100,25 +97,20 @@ class LoggerService {
 
   private logToConsole(entry: LogEntry): void {
     const { level, message, timestamp, context, error } = entry;
-    
-    // Format the log message
     const formattedMessage = `[${timestamp}] ${level.toUpperCase()}: ${message}`;
-    
-    // Choose appropriate console method
     const consoleMethod = this.getConsoleMethod(level);
-    
+
     if (context || error) {
-      const additionalData: any = {};
+      const additionalData: Record<string, unknown> = {};
       if (context) additionalData.context = context;
       if (error) additionalData.error = { message: error.message, stack: error.stack };
-      
       consoleMethod(formattedMessage, additionalData);
     } else {
       consoleMethod(formattedMessage);
     }
   }
 
-  private getConsoleMethod(level: LogLevel): (...args: any[]) => void {
+  private getConsoleMethod(level: LogLevel): (...args: unknown[]) => void {
     switch (level) {
       case 'debug':
         return console.debug;
@@ -137,8 +129,6 @@ class LoggerService {
 
   private addToBuffer(entry: LogEntry): void {
     this.logBuffer.push(entry);
-    
-    // Trim buffer if it exceeds max size
     if (this.logBuffer.length > this.maxBufferSize) {
       this.logBuffer = this.logBuffer.slice(-this.maxBufferSize);
     }
@@ -146,46 +136,26 @@ class LoggerService {
 
   // ─── Public Utility Methods ───────────────────────────────────────────────────
 
-  /**
-   * Get recent log entries from buffer
-   */
   getRecentLogs(count: number = 100): LogEntry[] {
     return this.logBuffer.slice(-count);
   }
 
-  /**
-   * Get logs filtered by level
-   */
   getLogsByLevel(level: LogLevel, count: number = 100): LogEntry[] {
-    return this.logBuffer
-      .filter(entry => entry.level === level)
-      .slice(-count);
+    return this.logBuffer.filter((entry) => entry.level === level).slice(-count);
   }
 
-  /**
-   * Clear the log buffer
-   */
   clearBuffer(): void {
     this.logBuffer = [];
   }
 
-  /**
-   * Update logger configuration
-   */
   updateConfig(config: Partial<LoggerConfig>): void {
     this.config = { ...this.config, ...config };
   }
 
-  /**
-   * Get current configuration
-   */
   getConfig(): LoggerConfig {
     return { ...this.config };
   }
 
-  /**
-   * Create a child logger with additional context
-   */
   child(context: Record<string, unknown>): ChildLogger {
     return new ChildLogger(this, context);
   }
@@ -196,7 +166,7 @@ class LoggerService {
 class ChildLogger {
   constructor(
     private parent: LoggerService,
-    private context: Record<string, unknown>
+    private context: Record<string, unknown>,
   ) {}
 
   debug(message: string, additionalContext?: Record<string, unknown>): void {

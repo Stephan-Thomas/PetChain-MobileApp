@@ -1,7 +1,7 @@
 /**
  * Generic API response wrapper for successful responses
  */
-export interface ApiResponse<T = any> {
+export interface ApiResponse<T = unknown> {
   success: true;
   data: T;
   message?: string;
@@ -16,7 +16,7 @@ export interface ApiError {
   error: {
     code: string;
     message: string;
-    details?: Record<string, any>;
+    details?: Record<string, unknown>;
     stack?: string;
   };
   timestamp: string;
@@ -37,7 +37,7 @@ export interface PaginationMeta {
 /**
  * Paginated response wrapper
  */
-export interface PaginatedResponse<T = any> {
+export interface PaginatedResponse<T = unknown> {
   success: true;
   data: T[];
   pagination: PaginationMeta;
@@ -299,6 +299,7 @@ export interface ListMedicalRecordsRequest extends PaginationParams {
   type?: string;
   startDate?: string;
   endDate?: string;
+  diagnosis?: string;
 }
 
 /**
@@ -448,6 +449,20 @@ export const API_ENDPOINTS = {
   MEDICAL_RECORDS_DELETE: '/medical-records/:id',
   MEDICAL_RECORDS_BY_PET: '/medical-records/pet/:petId',
 
+  // Appointments
+  APPOINTMENTS_LIST: '/appointments',
+  APPOINTMENTS_GET: '/appointments/:id',
+  APPOINTMENTS_CREATE: '/appointments',
+  APPOINTMENTS_UPDATE: '/appointments/:id',
+  APPOINTMENTS_DELETE: '/appointments/:id',
+
+  // Medications
+  MEDICATIONS_LIST: '/medications',
+  MEDICATIONS_GET: '/medications/:id',
+  MEDICATIONS_CREATE: '/medications',
+  MEDICATIONS_UPDATE: '/medications/:id',
+  MEDICATIONS_DELETE: '/medications/:id',
+
   // Blockchain
   BLOCKCHAIN_RECORDS_VERIFY: '/blockchain/records/verify',
   BLOCKCHAIN_RECORDS_STORE: '/blockchain/records/store',
@@ -456,6 +471,16 @@ export const API_ENDPOINTS = {
   BLOCKCHAIN_TRANSACTIONS_GET: '/blockchain/transactions/:txHash',
   BLOCKCHAIN_TRANSACTIONS_HISTORY: '/blockchain/transactions/history',
   BLOCKCHAIN_NETWORK_INFO: '/blockchain/network/info',
+
+  // Session Monitoring
+  MONITORING_SESSION_START: '/monitoring/sessions/start',
+  MONITORING_SESSION_END: '/monitoring/sessions/end',
+  MONITORING_CRASHES: '/monitoring/crashes',
+  MONITORING_EVENTS: '/monitoring/events',
+  MONITORING_ANALYTICS_CRASH_FREE: '/monitoring/analytics/crash-free',
+  MONITORING_ANALYTICS_CRASH_FLOWS: '/monitoring/analytics/crash-flows',
+  MONITORING_ANALYTICS_DEVICE_BREAKDOWN: '/monitoring/analytics/device-breakdown',
+  MONITORING_ALERTS: '/monitoring/alerts',
 } as const;
 
 /**
@@ -469,8 +494,8 @@ export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 export interface ApiRequestConfig {
   method: HttpMethod;
   endpoint: string;
-  params?: Record<string, any>;
-  data?: any;
+  params?: Record<string, unknown>;
+  data?: unknown;
   headers?: Record<string, string>;
 }
 
@@ -634,3 +659,151 @@ export const MULTISIG_ENDPOINTS = {
   MULTISIG_KEY_ROTATION: '/multisig/key-rotation',
   MULTISIG_ACCOUNT_STATUS: '/multisig/accounts/:multisigAccountId/status',
 } as const;
+// ─── Session Monitoring Types ─────────────────────────────────────────────────
+
+/**
+ * Device metadata captured at session start
+ */
+export interface SessionDeviceMetadata {
+  model: string;
+  os: string;
+  osVersion: string;
+  appVersion: string;
+  platform: string;
+}
+
+/**
+ * Monitoring - Start Session Request
+ */
+export interface StartSessionRequest {
+  sessionId: string;
+  startedAt: string;
+  device: SessionDeviceMetadata;
+  appVersion: string;
+}
+
+/**
+ * Monitoring - Start Session Response
+ */
+export interface StartSessionResponse {
+  sessionId: string;
+  recorded: boolean;
+}
+
+/**
+ * Monitoring - End Session Request
+ */
+export interface EndSessionRequest {
+  sessionId: string;
+  endedAt: string;
+  status: 'ended' | 'abnormal';
+  durationMs: number;
+  flowPath: string[];
+  errorCount: number;
+  hasCrash: boolean;
+  recoveredFromInterruption?: boolean;
+}
+
+/**
+ * Monitoring - End Session Response
+ */
+export interface EndSessionResponse {
+  sessionId: string;
+  recorded: boolean;
+}
+
+/**
+ * Monitoring - Crash Report Request
+ */
+export interface CrashReportRequest {
+  sessionId: string;
+  error: string;
+  stack?: string;
+  timestamp: number;
+  appVersion: string;
+  device: SessionDeviceMetadata;
+  activeFlow: string;
+  flowPath: string[];
+}
+
+/**
+ * Monitoring - Crash Report Response
+ */
+export interface CrashReportResponse {
+  crashId: string;
+  recorded: boolean;
+}
+
+/**
+ * Monitoring - Session Event (single event in a batch)
+ */
+export interface SessionEventPayload {
+  id: string;
+  sessionId: string;
+  type: 'session_start' | 'session_end' | 'navigation' | 'error' | 'crash' | 'user_action' | 'network_error' | 'api_error';
+  flow: string;
+  timestamp: number;
+  data: Record<string, unknown>;
+}
+
+/**
+ * Monitoring - Batch Events Request
+ */
+export interface BatchEventsRequest {
+  events: SessionEventPayload[];
+}
+
+/**
+ * Monitoring - Batch Events Response
+ */
+export interface BatchEventsResponse {
+  accepted: number;
+  rejected: number;
+  total: number;
+}
+
+/**
+ * Monitoring - Crash-Free Stats Response
+ */
+export interface CrashFreeStatsResponse {
+  appVersion: string;
+  totalSessions: number;
+  crashedSessions: number;
+  crashFreeRate: number;
+  isBelowThreshold: boolean;
+  topCrashFlows: Array<{
+    flow: string;
+    crashCount: number;
+    percentage: number;
+  }>;
+  byDevice: Array<{
+    model: string;
+    crashCount: number;
+    crashFreeRate: number;
+  }>;
+  byOsVersion: Array<{
+    os: string;
+    osVersion: string;
+    crashCount: number;
+    crashFreeRate: number;
+  }>;
+  calculatedAt: string;
+}
+
+/**
+ * Monitoring - Alert Request
+ */
+export interface MonitoringAlertRequest {
+  type: 'crash_free_rate_below_threshold';
+  appVersion: string;
+  currentRate: number;
+  threshold: number;
+  timestamp: string;
+}
+
+/**
+ * Monitoring - Alert Response
+ */
+export interface MonitoringAlertResponse {
+  recorded: boolean;
+}

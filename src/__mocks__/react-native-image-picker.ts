@@ -4,4 +4,6 @@
 module.exports = {
   launchImageLibrary: jest.fn(),
   launchCamera: jest.fn(),
+module.exports = {
+  launchImageLibrary: jest.fn(),
 };

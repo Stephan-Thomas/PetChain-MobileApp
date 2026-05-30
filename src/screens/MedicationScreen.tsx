@@ -22,12 +22,17 @@ import {
   saveMedication,
   scheduleRefillReminder,
 } from '../services/medicationService';
+import {
+  checkDrugInteractions,
+  getSeverityLabel,
+  recordVetOverride,
+  type InteractionCheckResult,
+} from '../services/drugInteractionService';
 import { scheduleMedicationReminder } from '../services/notificationService';
-
-// ─── Types ────────────────────────────────────────────────────────────────────
+import { formatLocalDate, formatLocalTime } from '../utils/dateLocale';
+import { useSecureScreen } from '../utils/secureScreen';
 
 type Tab = 'list' | 'daily' | 'weekly';
-
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 const EMPTY_FORM: Omit<Medication, 'id'> = {
@@ -46,20 +51,9 @@ const EMPTY_FORM: Omit<Medication, 'id'> = {
   notes: '',
 };
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function formatTime(date: Date): string {
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString();
-}
-
 function todayDates(): Date[] {
   return [new Date()];
 }
-
 function weekDates(): Date[] {
   const today = new Date();
   const day = today.getDay();
@@ -70,17 +64,19 @@ function weekDates(): Date[] {
   });
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
-
 const MedicationScreen: React.FC = () => {
+  useSecureScreen();
+
   const [tab, setTab] = useState<Tab>('list');
   const [medications, setMedications] = useState<Medication[]>([]);
   const [doseLogs, setDoseLogs] = useState<DoseLog[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingMed, setEditingMed] = useState<Medication | null>(null);
   const [form, setForm] = useState<Omit<Medication, 'id'>>(EMPTY_FORM);
-
-  // ── Load data ──────────────────────────────────────────────────────────────
+  const [interactionResult, setInteractionResult] = useState<InteractionCheckResult | null>(null);
+  const [vetOverrideMode, setVetOverrideMode] = useState(false);
+  const [vetId, setVetId] = useState('');
+  const [overrideJustification, setOverrideJustification] = useState('');
 
   const loadData = useCallback(async () => {
     const [meds, logs] = await Promise.all([getMedications(), getDoseLogs()]);
@@ -92,29 +88,50 @@ const MedicationScreen: React.FC = () => {
     void loadData();
   }, [loadData]);
 
-  // ── Modal helpers ──────────────────────────────────────────────────────────
-
   const openAdd = () => {
     setEditingMed(null);
     setForm(EMPTY_FORM);
     setModalVisible(true);
   };
-
-  const openEdit = (med: Medication) => {
+  const openEdit = useCallback((med: Medication) => {
     setEditingMed(med);
     setForm({ ...med });
     setModalVisible(true);
-  };
-
+  }, []);
   const closeModal = () => setModalVisible(false);
-
-  // ── Save ───────────────────────────────────────────────────────────────────
 
   const handleSave = async () => {
     if (!form.petId.trim() || !form.name.trim() || !form.dosage.trim()) {
       Alert.alert('Validation', 'Pet ID, name, and dosage are required.');
       return;
     }
+
+    // Check drug interactions when adding a new medication
+    if (!editingMed) {
+      const existingNames = medications
+        .filter((m) => m.petId === form.petId.trim())
+        .map((m) => m.name);
+      const result = await checkDrugInteractions(form.name.trim(), existingNames);
+      if (result.hasInteractions && !vetOverrideMode) {
+        setInteractionResult(result);
+        return; // block save until user acknowledges or vet overrides
+      }
+      if (result.hasInteractions && vetOverrideMode) {
+        if (!vetId.trim() || !overrideJustification.trim()) {
+          Alert.alert('Override Required', 'Vet ID and justification are required to override.');
+          return;
+        }
+        for (const interaction of result.interactions) {
+          await recordVetOverride({
+            drugA: interaction.drugA,
+            drugB: interaction.drugB,
+            vetId: vetId.trim(),
+            justification: overrideJustification.trim(),
+          });
+        }
+      }
+    }
+
     const med: Medication = {
       ...form,
       id: editingMed?.id ?? Date.now().toString(),
@@ -125,49 +142,54 @@ const MedicationScreen: React.FC = () => {
     await saveMedication(med);
     await scheduleRefillReminder(med);
     await scheduleMedicationReminder(med);
+    setInteractionResult(null);
+    setVetOverrideMode(false);
+    setVetId('');
+    setOverrideJustification('');
     closeModal();
     void loadData();
   };
 
-  // ── Delete ─────────────────────────────────────────────────────────────────
-
-  const handleDelete = (id: string) => {
-    Alert.alert('Delete', 'Remove this medication?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          await deleteMedication(id);
-          void loadData();
+  const handleDelete = useCallback(
+    (id: string) => {
+      Alert.alert('Delete', 'Remove this medication?', [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            await deleteMedication(id);
+            void loadData();
+          },
         },
-      },
-    ]);
-  };
+      ]);
+    },
+    [loadData],
+  );
 
-  // ── Log dose ───────────────────────────────────────────────────────────────
-
-  const handleLogDose = async (medicationId: string, skipped = false) => {
-    const log: DoseLog = {
-      id: Date.now().toString(),
-      medicationId,
-      takenAt: new Date().toISOString(),
-      skipped,
-    };
-    await logDose(log);
-
-    // Decrement remaining pills
-    const med = medications.find((m) => m.id === medicationId);
-    if (med?.remainingPills !== undefined && !skipped) {
-      await saveMedication({ ...med, remainingPills: Math.max(0, med.remainingPills - 1) });
-    }
-    void loadData();
-  };
-
-  // ── Dose status helpers ────────────────────────────────────────────────────
+  const handleLogDose = useCallback(
+    async (medicationId: string, skipped = false) => {
+      const log: DoseLog = {
+        id: Date.now().toString(),
+        medicationId,
+        takenAt: new Date().toISOString(),
+        skipped,
+      };
+      await logDose(log);
+      const med = medications.find((m) => m.id === medicationId);
+      if (med?.remainingPills !== undefined && !skipped) {
+        await saveMedication({
+          ...med,
+          remainingPills: Math.max(0, med.remainingPills - 1),
+        });
+      }
+      void loadData();
+    },
+    [medications, loadData],
+  );
 
   const isDoseTaken = (medicationId: string, scheduledTime: Date): boolean => {
-    const windowMs = 30 * 60 * 1000; // ±30 min window
+    const windowMs = 30 * 60 * 1000;
     return doseLogs.some(
       (l) =>
         l.medicationId === medicationId &&
@@ -176,85 +198,79 @@ const MedicationScreen: React.FC = () => {
     );
   };
 
-  // ─── Render: Medication List ───────────────────────────────────────────────
-
-  const renderMedItem = ({ item }: { item: Medication }) => {
-    const lowStock =
-      item.remainingPills !== undefined &&
-      item.totalPills !== undefined &&
-      item.remainingPills <= item.totalPills * 0.2;
-
-    return (
-      <View style={styles.card}>
-        <View style={styles.cardHeader}>
-          <Text style={styles.medName}>{item.name}</Text>
-          <View style={styles.cardActions}>
-            <TouchableOpacity onPress={() => openEdit(item)} style={styles.actionBtn}>
-              <Text style={styles.actionBtnText}>Edit</Text>
+  const renderMedItem = useCallback(
+    ({ item }: { item: Medication }) => {
+      const lowStock =
+        item.remainingPills !== undefined &&
+        item.totalPills !== undefined &&
+        item.remainingPills <= item.totalPills * 0.2;
+      return (
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <Text style={styles.medName}>{item.name}</Text>
+            <View style={styles.cardActions}>
+              <TouchableOpacity onPress={() => openEdit(item)} style={styles.actionBtn}>
+                <Text style={styles.actionBtnText}>Edit</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => handleDelete(item.id)}
+                style={[styles.actionBtn, styles.deleteBtn]}
+              >
+                <Text style={[styles.actionBtnText, styles.deleteBtnText]}>Delete</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+          <Text style={styles.medDetail}>
+            {item.dosage} · every {item.frequency}h
+          </Text>
+          <Text style={styles.medDetail}>Started: {formatLocalDate(item.startDate)}</Text>
+          <Text style={styles.medDetail}>Pet ID: {item.petId}</Text>
+          {item.instructions ? (
+            <Text style={styles.medDetail}>Instructions: {item.instructions}</Text>
+          ) : null}
+          {item.prescriberInfo?.name ? (
+            <Text style={styles.medDetail}>
+              Prescriber: {item.prescriberInfo.name}
+              {item.prescriberInfo.contact ? ` • ${item.prescriberInfo.contact}` : ''}
+            </Text>
+          ) : null}
+          {item.pharmacyInfo?.name ? (
+            <Text style={styles.medDetail}>
+              Pharmacy: {item.pharmacyInfo.name}
+              {item.pharmacyInfo.phone ? ` • ${item.pharmacyInfo.phone}` : ''}
+            </Text>
+          ) : null}
+          {item.endDate ? (
+            <Text style={styles.medDetail}>Ends: {formatLocalDate(item.endDate)}</Text>
+          ) : null}
+          {item.remainingPills !== undefined && (
+            <Text style={[styles.medDetail, lowStock && styles.lowStock]}>
+              Pills remaining: {item.remainingPills}
+              {lowStock ? ' ⚠ Low stock' : ''}
+            </Text>
+          )}
+          {item.refillDate ? (
+            <Text style={styles.medDetail}>Refill by: {formatLocalDate(item.refillDate)}</Text>
+          ) : null}
+          <View style={styles.doseActions}>
+            <TouchableOpacity
+              style={styles.logBtn}
+              onPress={() => void handleLogDose(item.id, false)}
+            >
+              <Text style={styles.logBtnText}>✓ Log Dose</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              onPress={() => handleDelete(item.id)}
-              style={[styles.actionBtn, styles.deleteBtn]}
+              style={[styles.logBtn, styles.skipBtn]}
+              onPress={() => void handleLogDose(item.id, true)}
             >
-              <Text style={[styles.actionBtnText, styles.deleteBtnText]}>Delete</Text>
+              <Text style={styles.logBtnText}>✗ Skip</Text>
             </TouchableOpacity>
           </View>
         </View>
-
-        <Text style={styles.medDetail}>
-          {item.dosage} · every {item.frequency}h
-        </Text>
-        <Text style={styles.medDetail}>Started: {formatDate(item.startDate)}</Text>
-
-        <Text style={styles.medDetail}>Pet ID: {item.petId}</Text>
-        {item.instructions ? (
-          <Text style={styles.medDetail}>Instructions: {item.instructions}</Text>
-        ) : null}
-        {item.prescriberInfo?.name ? (
-          <Text style={styles.medDetail}>
-            Prescriber: {item.prescriberInfo.name}
-            {item.prescriberInfo.contact ? ` • ${item.prescriberInfo.contact}` : ''}
-          </Text>
-        ) : null}
-        {item.pharmacyInfo?.name ? (
-          <Text style={styles.medDetail}>
-            Pharmacy: {item.pharmacyInfo.name}
-            {item.pharmacyInfo.phone ? ` • ${item.pharmacyInfo.phone}` : ''}
-          </Text>
-        ) : null}
-        <Text style={styles.medDetail}>Started: {formatDate(item.startDate)}</Text>
-        {item.endDate && <Text style={styles.medDetail}>Ends: {formatDate(item.endDate)}</Text>}
-        {item.remainingPills !== undefined && (
-          <Text style={[styles.medDetail, lowStock && styles.lowStock]}>
-            Pills remaining: {item.remainingPills}
-            {lowStock ? ' ⚠ Low stock' : ''}
-          </Text>
-        )}
-
-        {item.refillDate && (
-          <Text style={styles.medDetail}>Refill by: {formatDate(item.refillDate)}</Text>
-        )}
-
-        <View style={styles.doseActions}>
-          <TouchableOpacity
-            style={styles.logBtn}
-            onPress={() => void handleLogDose(item.id, false)}
-          >
-            <Text style={styles.logBtnText}>✓ Log Dose</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.logBtn, styles.skipBtn]}
-            onPress={() => void handleLogDose(item.id, true)}
-          >
-            <Text style={styles.logBtnText}>✗ Skip</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  };
-
-  // ─── Render: Schedule (daily or weekly) ───────────────────────────────────
-
+      );
+    },
+    [openEdit, handleDelete, handleLogDose],
+  );
   const renderSchedule = (dates: Date[]) => (
     <ScrollView style={styles.scheduleContainer}>
       {dates.map((date) => {
@@ -262,12 +278,10 @@ const MedicationScreen: React.FC = () => {
           dates.length === 1
             ? 'Today'
             : `${DAYS[date.getDay()]} ${date.getMonth() + 1}/${date.getDate()}`;
-
         const slots = medications.flatMap((med) =>
           getDaySchedule(med, date).map((time) => ({ med, time })),
         );
         slots.sort((a, b) => a.time.getTime() - b.time.getTime());
-
         return (
           <View key={date.toDateString()} style={styles.dayBlock}>
             <Text style={styles.dayLabel}>{label}</Text>
@@ -281,7 +295,7 @@ const MedicationScreen: React.FC = () => {
                     key={`${med.id}-${time.toISOString()}`}
                     style={[styles.slotRow, taken && styles.slotTaken]}
                   >
-                    <Text style={styles.slotTime}>{formatTime(time)}</Text>
+                    <Text style={styles.slotTime}>{formatLocalTime(time)}</Text>
                     <Text style={styles.slotName}>
                       {med.name} · {med.dosage}
                     </Text>
@@ -296,38 +310,30 @@ const MedicationScreen: React.FC = () => {
     </ScrollView>
   );
 
-  // ─── Render: Form Modal ────────────────────────────────────────────────────
-
   const renderModal = () => (
     <Modal visible={modalVisible} animationType="slide" transparent onRequestClose={closeModal}>
       <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
+        <ScrollView style={styles.modalContent}>
           <Text style={styles.modalTitle}>{editingMed ? 'Edit Medication' : 'Add Medication'}</Text>
-
-          <TextInput
-            style={styles.input}
-            placeholder="Medication name *"
-            value={form.name}
-            onChangeText={(v) => setForm((f) => ({ ...f, name: v }))}
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="Dosage (e.g. 5mg) *"
-            value={form.dosage}
-            onChangeText={(v) => setForm((f) => ({ ...f, dosage: v }))}
-          />
+          {[
+            { placeholder: 'Medication name *', key: 'name' as const },
+            { placeholder: 'Dosage (e.g. 5mg) *', key: 'dosage' as const },
+            { placeholder: 'Pet ID *', key: 'petId' as const },
+          ].map(({ placeholder, key }) => (
+            <TextInput
+              key={key}
+              style={styles.input}
+              placeholder={placeholder}
+              value={form[key] as string}
+              onChangeText={(v) => setForm((f) => ({ ...f, [key]: v }))}
+            />
+          ))}
           <TextInput
             style={styles.input}
             placeholder="Frequency (hours between doses)"
             keyboardType="numeric"
             value={String(form.frequency)}
             onChangeText={(v) => setForm((f) => ({ ...f, frequency: Number(v) || 8 }))}
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="Pet ID *"
-            value={form.petId}
-            onChangeText={(v) => setForm((f) => ({ ...f, petId: v }))}
           />
           <TextInput
             style={styles.input}
@@ -340,7 +346,10 @@ const MedicationScreen: React.FC = () => {
             placeholder="End date (YYYY-MM-DD)"
             value={form.endDate?.slice(0, 10) ?? ''}
             onChangeText={(v) =>
-              setForm((f) => ({ ...f, endDate: v ? new Date(v).toISOString() : '' }))
+              setForm((f) => ({
+                ...f,
+                endDate: v ? new Date(v).toISOString() : '',
+              }))
             }
           />
           <TextInput
@@ -348,7 +357,10 @@ const MedicationScreen: React.FC = () => {
             placeholder="Refill date (YYYY-MM-DD)"
             value={form.refillDate?.slice(0, 10) ?? ''}
             onChangeText={(v) =>
-              setForm((f) => ({ ...f, refillDate: v ? new Date(v).toISOString() : '' }))
+              setForm((f) => ({
+                ...f,
+                refillDate: v ? new Date(v).toISOString() : '',
+              }))
             }
           />
           <TextInput
@@ -437,7 +449,10 @@ const MedicationScreen: React.FC = () => {
             keyboardType="numeric"
             value={form.remainingPills !== undefined ? String(form.remainingPills) : ''}
             onChangeText={(v) =>
-              setForm((f) => ({ ...f, remainingPills: v ? Number(v) : undefined }))
+              setForm((f) => ({
+                ...f,
+                remainingPills: v ? Number(v) : undefined,
+              }))
             }
           />
           <TextInput
@@ -447,7 +462,6 @@ const MedicationScreen: React.FC = () => {
             value={form.notes ?? ''}
             onChangeText={(v) => setForm((f) => ({ ...f, notes: v }))}
           />
-
           <View style={styles.modalActions}>
             <TouchableOpacity style={styles.cancelBtn} onPress={closeModal}>
               <Text style={styles.cancelBtnText}>Cancel</Text>
@@ -456,24 +470,60 @@ const MedicationScreen: React.FC = () => {
               <Text style={styles.saveBtnText}>Save</Text>
             </TouchableOpacity>
           </View>
-        </View>
+
+          {/* Drug interaction warning */}
+          {interactionResult?.hasInteractions && (
+            <View style={styles.interactionWarning}>
+              <Text style={styles.interactionTitle}>⚠️ Drug Interaction Detected</Text>
+              {interactionResult.interactions.map((i, idx) => (
+                <View key={idx} style={styles.interactionItem}>
+                  <Text style={styles.interactionSeverity}>{getSeverityLabel(i.severity)}</Text>
+                  <Text style={styles.interactionDesc}>{i.description}</Text>
+                  <Text style={styles.interactionRec}>{i.recommendation}</Text>
+                </View>
+              ))}
+              {!vetOverrideMode ? (
+                <TouchableOpacity
+                  style={styles.overrideBtn}
+                  onPress={() => setVetOverrideMode(true)}
+                >
+                  <Text style={styles.overrideBtnText}>Vet Override</Text>
+                </TouchableOpacity>
+              ) : (
+                <View>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Vet ID *"
+                    value={vetId}
+                    onChangeText={setVetId}
+                  />
+                  <TextInput
+                    style={[styles.input, styles.textArea]}
+                    placeholder="Justification for override *"
+                    multiline
+                    value={overrideJustification}
+                    onChangeText={setOverrideJustification}
+                  />
+                  <TouchableOpacity style={styles.saveBtn} onPress={() => void handleSave()}>
+                    <Text style={styles.saveBtnText}>Save with Override</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          )}
+        </ScrollView>
       </View>
     </Modal>
   );
 
-  // ─── Main render ───────────────────────────────────────────────────────────
-
   return (
     <View style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Medications</Text>
         <TouchableOpacity style={styles.addBtn} onPress={openAdd}>
           <Text style={styles.addBtnText}>+ Add</Text>
         </TouchableOpacity>
       </View>
-
-      {/* Tabs */}
       <View style={styles.tabs}>
         {(['list', 'daily', 'weekly'] as Tab[]).map((t) => (
           <TouchableOpacity
@@ -487,8 +537,6 @@ const MedicationScreen: React.FC = () => {
           </TouchableOpacity>
         ))}
       </View>
-
-      {/* Content */}
       {tab === 'list' && (
         <FlatList
           data={medications}
@@ -496,21 +544,21 @@ const MedicationScreen: React.FC = () => {
           renderItem={renderMedItem}
           contentContainerStyle={styles.listContent}
           ListEmptyComponent={<Text style={styles.emptyText}>No medications added yet.</Text>}
+          removeClippedSubviews
+          maxToRenderPerBatch={10}
+          windowSize={5}
+          initialNumToRender={10}
         />
       )}
       {tab === 'daily' && renderSchedule(todayDates())}
       {tab === 'weekly' && renderSchedule(weekDates())}
-
       {renderModal()}
     </View>
   );
 };
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
-
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -528,7 +576,6 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   addBtnText: { color: '#fff', fontWeight: '600' },
-
   tabs: {
     flexDirection: 'row',
     backgroundColor: '#fff',
@@ -539,9 +586,7 @@ const styles = StyleSheet.create({
   activeTab: { borderBottomWidth: 2, borderBottomColor: '#4CAF50' },
   tabText: { color: '#666', fontSize: 14 },
   activeTabText: { color: '#4CAF50', fontWeight: '600' },
-
   listContent: { padding: 12 },
-
   card: {
     backgroundColor: '#fff',
     borderRadius: 10,
@@ -569,10 +614,8 @@ const styles = StyleSheet.create({
   actionBtnText: { fontSize: 12, color: '#4CAF50', fontWeight: '600' },
   deleteBtn: { backgroundColor: '#fdecea' },
   deleteBtnText: { color: '#e53935' },
-
   medDetail: { fontSize: 13, color: '#555', marginTop: 2 },
   lowStock: { color: '#e65100', fontWeight: '600' },
-
   doseActions: { flexDirection: 'row', gap: 8, marginTop: 10 },
   logBtn: {
     flex: 1,
@@ -583,7 +626,6 @@ const styles = StyleSheet.create({
   },
   skipBtn: { backgroundColor: '#9e9e9e' },
   logBtnText: { color: '#fff', fontWeight: '600', fontSize: 13 },
-
   scheduleContainer: { flex: 1, padding: 12 },
   dayBlock: { marginBottom: 16 },
   dayLabel: { fontSize: 15, fontWeight: '700', color: '#333', marginBottom: 6 },
@@ -601,11 +643,17 @@ const styles = StyleSheet.create({
   slotTime: { fontSize: 13, fontWeight: '600', color: '#333', width: 60 },
   slotName: { flex: 1, fontSize: 13, color: '#555' },
   takenBadge: { fontSize: 16, color: '#4CAF50' },
-
-  emptyText: { textAlign: 'center', color: '#999', marginTop: 20, fontSize: 14 },
-
-  // Modal
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  emptyText: {
+    textAlign: 'center',
+    color: '#999',
+    marginTop: 20,
+    fontSize: 14,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
   modalContent: {
     backgroundColor: '#fff',
     borderTopLeftRadius: 16,
@@ -613,7 +661,12 @@ const styles = StyleSheet.create({
     padding: 20,
     maxHeight: '90%',
   },
-  modalTitle: { fontSize: 18, fontWeight: '700', marginBottom: 14, color: '#1a1a1a' },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 14,
+    color: '#1a1a1a',
+  },
   input: {
     borderWidth: 1,
     borderColor: '#ddd',
@@ -643,6 +696,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   saveBtnText: { color: '#fff', fontWeight: '600' },
+  interactionWarning: {
+    marginTop: 12,
+    padding: 12,
+    backgroundColor: '#FFF3CD',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FFCA28',
+  },
+  interactionTitle: { fontSize: 15, fontWeight: '700', color: '#7B4F00', marginBottom: 8 },
+  interactionItem: { marginBottom: 10 },
+  interactionSeverity: { fontWeight: '700', fontSize: 13, marginBottom: 2 },
+  interactionDesc: { fontSize: 13, color: '#333', marginBottom: 2 },
+  interactionRec: { fontSize: 12, color: '#555', fontStyle: 'italic' },
+  overrideBtn: {
+    marginTop: 8,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#E53935',
+    alignItems: 'center',
+  },
+  overrideBtnText: { color: '#fff', fontWeight: '700' },
 });
 
 export default MedicationScreen;
