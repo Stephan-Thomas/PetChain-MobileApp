@@ -489,3 +489,148 @@ export function isPaginatedResponse<T>(
 ): response is PaginatedResponse<T> {
   return 'pagination' in response;
 }
+
+// ─── Multisig / Joint Ownership Types ────────────────────────────────────────
+
+/**
+ * Multisig - Create Joint Ownership Request
+ */
+export interface CreateJointOwnershipRequest {
+  petId: string;
+  initiatorPublicKey: string;
+  coOwners: Array<{
+    userId: string;
+    name: string;
+    email: string;
+    publicKey: string;
+    weight: number;
+  }>;
+  /** Minimum total weight required for critical operations (M-of-N) */
+  requiredWeight: number;
+}
+
+/**
+ * Multisig - Co-owner summary in responses
+ */
+export interface CoOwnerResponse {
+  userId: string;
+  name: string;
+  email: string;
+  publicKey: string;
+  weight: number;
+  status: 'pending' | 'active' | 'revoked';
+  invitedAt: string;
+  acceptedAt?: string;
+}
+
+/**
+ * Multisig - Joint Ownership Response
+ */
+export interface JointOwnershipResponse {
+  id: string;
+  petId: string;
+  multisigAccountId: string;
+  multisigPublicKey: string;
+  coOwners: CoOwnerResponse[];
+  thresholds: { low: number; medium: number; high: number };
+  requiredWeight: number;
+  totalWeight: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Multisig - Pending Transaction Response
+ */
+export interface PendingTransactionResponse {
+  id: string;
+  multisigAccountId: string;
+  operationType: 'ownership_transfer' | 'record_deletion' | 'signer_management';
+  description: string;
+  requiredSignatures: number;
+  currentSignatureCount: number;
+  signers: Array<{
+    publicKey: string;
+    userId?: string;
+    name?: string;
+    hasSigned: boolean;
+    signedAt?: string;
+  }>;
+  status: 'pending' | 'approved' | 'rejected' | 'expired';
+  createdBy: string;
+  expiresAt: string;
+  createdAt: string;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Multisig - Sign Transaction Request
+ */
+export interface SignTransactionRequest {
+  transactionId: string;
+  /** Base64-encoded signed transaction XDR */
+  signedTransactionXdr: string;
+  signerPublicKey: string;
+}
+
+/**
+ * Multisig - Initiate Ownership Transfer Request
+ */
+export interface InitiateOwnershipTransferRequest {
+  petId: string;
+  jointOwnershipId: string;
+  newOwnerPublicKey: string;
+  newOwnerUserId: string;
+  reason?: string;
+}
+
+/**
+ * Multisig - Initiate Record Deletion Request
+ */
+export interface InitiateRecordDeletionRequest {
+  petId: string;
+  jointOwnershipId: string;
+  recordId: string;
+  recordType: 'medical_record' | 'vaccination' | 'medication';
+  reason: string;
+}
+
+/**
+ * Multisig - Invite Co-owner Request
+ */
+export interface InviteCoOwnerRequest {
+  petId: string;
+  jointOwnershipId: string;
+  invitedEmail: string;
+  invitedUserId?: string;
+  weight: number;
+}
+
+/**
+ * Multisig - Key Rotation Request
+ */
+export interface KeyRotationRequest {
+  jointOwnershipId: string;
+  oldPublicKey: string;
+  newPublicKey: string;
+  reason?: string;
+}
+
+// Extend API_ENDPOINTS with multisig routes
+export const MULTISIG_ENDPOINTS = {
+  JOINT_OWNERSHIP_CREATE: '/joint-ownership',
+  JOINT_OWNERSHIP_GET: '/joint-ownership/:id',
+  JOINT_OWNERSHIP_BY_PET: '/joint-ownership/pet/:petId',
+  JOINT_OWNERSHIP_INVITE: '/joint-ownership/:id/invite',
+  JOINT_OWNERSHIP_ACCEPT_INVITE: '/joint-ownership/invites/:inviteId/accept',
+  JOINT_OWNERSHIP_DECLINE_INVITE: '/joint-ownership/invites/:inviteId/decline',
+  JOINT_OWNERSHIP_PENDING_INVITES: '/joint-ownership/invites/pending',
+  MULTISIG_TRANSACTIONS_LIST: '/multisig/transactions',
+  MULTISIG_TRANSACTIONS_PENDING: '/multisig/transactions/pending',
+  MULTISIG_TRANSACTION_SIGN: '/multisig/transactions/:id/sign',
+  MULTISIG_TRANSACTION_REJECT: '/multisig/transactions/:id/reject',
+  MULTISIG_OWNERSHIP_TRANSFER: '/multisig/ownership-transfer',
+  MULTISIG_RECORD_DELETION: '/multisig/record-deletion',
+  MULTISIG_KEY_ROTATION: '/multisig/key-rotation',
+  MULTISIG_ACCOUNT_STATUS: '/multisig/accounts/:multisigAccountId/status',
+} as const;

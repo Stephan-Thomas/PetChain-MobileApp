@@ -67,15 +67,15 @@ Notifications.setNotificationHandler({
 // ─── Permissions ──────────────────────────────────────────────────────────────
 
 export const requestPermissions = async (): Promise<boolean> => {
-  const { status: existing } = await Notifications.getPermissionsAsync();
-  if (existing === 'granted') return true;
-  const { status } = await Notifications.requestPermissionsAsync();
-  return status === 'granted';
+  const existing = await Notifications.getPermissionsAsync();
+  if ((existing as any).granted ?? (existing as any).status === 'granted') return true;
+  const result = await Notifications.requestPermissionsAsync();
+  return (result as any).granted ?? (result as any).status === 'granted';
 };
 
 export const checkPermissions = async (): Promise<boolean> => {
-  const { status } = await Notifications.getPermissionsAsync();
-  return status === 'granted';
+  const result = await Notifications.getPermissionsAsync();
+  return (result as any).granted ?? (result as any).status === 'granted';
 };
 
 // ─── Preferences ─────────────────────────────────────────────────────────────

@@ -39,12 +39,27 @@ class MockWebSocket {
   onclose: any = null;
   onmessage: any = null;
   onerror: any = null;
+  private _listeners: Record<string, Array<(...args: any[]) => void>> = {};
   
   constructor(public url: string) {}
   
   send(data: string): void {}
   close(): void {
     this.readyState = MockWebSocket.CLOSED;
+    (this._listeners['close'] ?? []).forEach(fn => fn());
+  }
+  on(event: string, listener: (...args: any[]) => void): this {
+    if (!this._listeners[event]) this._listeners[event] = [];
+    this._listeners[event].push(listener);
+    return this;
+  }
+  off(event: string, listener: (...args: any[]) => void): this {
+    this._listeners[event] = (this._listeners[event] ?? []).filter(fn => fn !== listener);
+    return this;
+  }
+  emit(event: string, ...args: any[]): boolean {
+    (this._listeners[event] ?? []).forEach(fn => fn(...args));
+    return true;
   }
 }
 

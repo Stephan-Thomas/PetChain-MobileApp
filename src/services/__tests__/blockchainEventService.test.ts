@@ -120,6 +120,7 @@ describe('BlockchainEventService', () => {
       reconnectDelay: 100, // Faster for tests
       maxReconnectAttempts: 3,
       heartbeatInterval: 1000,
+      connectionTimeoutMs: 50, // Fast timeout for tests
     });
 
     // Capture the WebSocket instance created by the service
@@ -153,47 +154,59 @@ describe('BlockchainEventService', () => {
     });
 
     it('handles connection timeout', async () => {
-      // Mock WebSocket that never opens
+      // Create a service with a very short timeout
+      const timeoutService = new BlockchainEventService({
+        websocketUrl: 'ws://localhost:3001/test',
+        reconnectDelay: 99999,
+        maxReconnectAttempts: 0, // no reconnect
+        heartbeatInterval: 99999,
+        connectionTimeoutMs: 20, // 20ms timeout
+      });
+
+      // Override WebSocket with one that never opens
       (global as any).WebSocket = class {
-        readyState = MockWebSocket.CONNECTING;
+        readyState = 0;
         onopen: any = null;
         onclose: any = null;
         onmessage: any = null;
         onerror: any = null;
-        
-        constructor() {
-          // Never call onopen
-        }
-        
+        constructor() { /* never fires onopen */ }
         send() {}
         close() {}
       };
 
-      await expect(service.connect()).rejects.toThrow('Connection timeout');
+      await expect(timeoutService.connect()).rejects.toThrow('Connection timeout');
+      timeoutService.destroy();
     });
 
     it('handles connection errors', async () => {
-      // Mock WebSocket that errors immediately
+      // Override WebSocket with one that fires onerror via microtask
       (global as any).WebSocket = class {
-        readyState = MockWebSocket.CONNECTING;
+        readyState = 0;
         onopen: any = null;
         onclose: any = null;
         onmessage: any = null;
         onerror: any = null;
-        
         constructor() {
-          setTimeout(() => {
-            if (this.onerror) {
-              this.onerror(new Event('error'));
-            }
-          }, 5);
+          Promise.resolve().then(() => {
+            if (this.onerror) this.onerror(new Event('error'));
+          });
         }
-        
         send() {}
         close() {}
       };
 
-      await expect(service.connect()).rejects.toThrow('WebSocket connection error');
+      // Create a fresh service so the override is in effect
+      const errorService = new BlockchainEventService({
+        websocketUrl: 'ws://localhost:3001/test',
+        reconnectDelay: 99999,
+        maxReconnectAttempts: 0,
+        heartbeatInterval: 99999,
+        connectionTimeoutMs: 5000,
+      });
+
+      await expect(errorService.connect()).rejects.toThrow('WebSocket connection error');
+      errorService.destroy();
     });
 
     it('does not reconnect if already connected', async () => {
@@ -396,39 +409,35 @@ describe('BlockchainEventService', () => {
       // Create service with low max attempts for testing
       const testService = new BlockchainEventService({
         maxReconnectAttempts: 2,
-        reconnectDelay: 50,
+        reconnectDelay: 30,
+        connectionTimeoutMs: 20,
       });
 
-      // Mock WebSocket to always fail
+      // Mock WebSocket to always fail via onerror (microtask)
       (global as any).WebSocket = class {
-        constructor() {
-          setTimeout(() => {
-            if (this.onerror) {
-              this.onerror(new Event('error'));
-            }
-          }, 5);
-        }
-        
-        readyState = MockWebSocket.CONNECTING;
+        readyState = 0;
         onopen: any = null;
         onclose: any = null;
         onmessage: any = null;
         onerror: any = null;
+        constructor() {
+          Promise.resolve().then(() => {
+            if (this.onerror) this.onerror(new Event('error'));
+          });
+        }
         send() {}
         close() {}
       };
 
-      try {
-        await testService.connect();
-      } catch (error) {
-        // Expected to fail
-      }
+      // Initial connect fails — scheduleReconnection is called
+      try { await testService.connect(); } catch { /* expected */ }
 
-      // Wait for reconnection attempts
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
+      // Wait for 2 reconnect attempts to exhaust:
+      // attempt 1: delay=30ms, attempt 2: delay=60ms → total ~120ms + buffer
+      await new Promise(resolve => setTimeout(resolve, 400));
+
       expect(testService.getStatus().error).toBe('Max reconnection attempts reached');
-      
+
       testService.destroy();
     });
   });

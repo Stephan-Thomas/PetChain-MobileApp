@@ -49,6 +49,7 @@ export interface EventServiceConfig {
   reconnectDelay: number;
   maxReconnectAttempts: number;
   heartbeatInterval: number;
+  connectionTimeoutMs: number;
 }
 
 export interface EventServiceStatus {
@@ -68,6 +69,7 @@ const DEFAULT_CONFIG: EventServiceConfig = {
   reconnectDelay: 3000,
   maxReconnectAttempts: 10,
   heartbeatInterval: 30000,
+  connectionTimeoutMs: 10000,
 };
 
 // ─── Blockchain Event Service ─────────────────────────────────────────────────
@@ -102,7 +104,7 @@ export class BlockchainEventService extends EventEmitter {
    * Connect to the blockchain event stream
    */
   async connect(accounts: string[] = []): Promise<void> {
-    if (this.websocket?.readyState === WebSocket.OPEN) {
+    if (this.websocket !== null && this.websocket.readyState === 1 /* OPEN */) {
       loggerService.debug('Already connected to blockchain events');
       return;
     }
@@ -116,6 +118,10 @@ export class BlockchainEventService extends EventEmitter {
       const errorMessage = error instanceof Error ? error.message : 'Connection failed';
       this.status.error = errorMessage;
       loggerService.error('Failed to connect to blockchain events', { error: errorMessage });
+      // Schedule reconnection if this was not a manual disconnect
+      if (!this.isManuallyDisconnected) {
+        this.scheduleReconnection();
+      }
       throw error;
     }
   }
@@ -144,7 +150,7 @@ export class BlockchainEventService extends EventEmitter {
   subscribeToAccounts(accounts: string[]): void {
     this.status.subscribedAccounts = accounts;
     
-    if (this.websocket?.readyState === WebSocket.OPEN) {
+    if (this.websocket !== null && this.websocket.readyState === 1 /* OPEN */) {
       this.sendMessage({
         type: 'subscribe',
         accounts,
@@ -198,22 +204,31 @@ export class BlockchainEventService extends EventEmitter {
           accounts: this.status.subscribedAccounts 
         });
 
+        // Declare timeout handle first so closures can reference it
+        let timeoutHandle: ReturnType<typeof setTimeout>;
+        let settled = false;
+
+        const settle = (fn: () => void) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeoutHandle);
+          fn();
+        };
+
         this.websocket = new WebSocket(this.config.websocketUrl);
 
         this.websocket.onopen = () => {
-          loggerService.info('Connected to blockchain events');
-          
-          this.updateConnectionStatus(true);
-          this.status.reconnectAttempts = 0;
-          this.status.error = null;
-          
-          // Subscribe to accounts if any
-          if (this.status.subscribedAccounts.length > 0) {
-            this.subscribeToAccounts(this.status.subscribedAccounts);
-          }
-          
-          this.startHeartbeat();
-          resolve();
+          settle(() => {
+            loggerService.info('Connected to blockchain events');
+            this.updateConnectionStatus(true);
+            this.status.reconnectAttempts = 0;
+            this.status.error = null;
+            if (this.status.subscribedAccounts.length > 0) {
+              this.subscribeToAccounts(this.status.subscribedAccounts);
+            }
+            this.startHeartbeat();
+            resolve();
+          });
         };
 
         this.websocket.onmessage = (event) => {
@@ -225,22 +240,22 @@ export class BlockchainEventService extends EventEmitter {
         };
 
         this.websocket.onerror = (error) => {
-          const errorMessage = 'WebSocket connection error';
-          loggerService.error(errorMessage, { error });
-          
-          this.status.error = errorMessage;
-          this.updateConnectionStatus(false);
-          
-          reject(new Error(errorMessage));
+          settle(() => {
+            const errorMessage = 'WebSocket connection error';
+            loggerService.error(errorMessage, { error });
+            this.status.error = errorMessage;
+            this.updateConnectionStatus(false);
+            reject(new Error(errorMessage));
+          });
         };
 
-        // Connection timeout
-        setTimeout(() => {
-          if (this.websocket?.readyState !== WebSocket.OPEN) {
+        // Connection timeout — rejects if WebSocket never opens
+        timeoutHandle = setTimeout(() => {
+          settle(() => {
             this.websocket?.close();
             reject(new Error('Connection timeout'));
-          }
-        }, 10000);
+          });
+        }, this.config.connectionTimeoutMs);
 
       } catch (error) {
         reject(error);
@@ -383,6 +398,7 @@ export class BlockchainEventService extends EventEmitter {
         loggerService.error('Reconnection failed', {
           error: error instanceof Error ? error.message : 'Unknown error',
         });
+        // Schedule next attempt — onclose may not fire if connection never opened
         this.scheduleReconnection();
       }
     }, delay);
@@ -411,7 +427,7 @@ export class BlockchainEventService extends EventEmitter {
   }
 
   private sendMessage(message: any): void {
-    if (this.websocket?.readyState === WebSocket.OPEN) {
+    if (this.websocket !== null && this.websocket.readyState === 1 /* OPEN */) {
       this.websocket.send(JSON.stringify(message));
     } else {
       loggerService.warn('Cannot send message: WebSocket not connected');

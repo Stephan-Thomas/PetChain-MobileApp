@@ -1,4 +1,6 @@
 import { Platform } from 'react-native';
+import { launchImageLibrary } from 'react-native-image-picker';
+import ImageResizer from 'react-native-image-resizer';
 
 export interface ImagePickerResult {
   uri: string;
@@ -21,8 +23,6 @@ export interface ImageUploadResult {
 
 export const pickImage = async (): Promise<ImagePickerResult | null> => {
   try {
-    const { launchImageLibrary } = await import('react-native-image-picker');
-    
     return new Promise((resolve) => {
       launchImageLibrary(
         {
@@ -55,9 +55,7 @@ export const pickImage = async (): Promise<ImagePickerResult | null> => {
 
 export const compressImage = async (uri: string): Promise<CompressedImage> => {
   try {
-    const ImageResizer = await import('react-native-image-resizer');
-    
-    const result = await ImageResizer.default.createResizedImage(
+    const result = await ImageResizer.createResizedImage(
       uri,
       800,
       600,
@@ -88,9 +86,7 @@ export const compressImage = async (uri: string): Promise<CompressedImage> => {
 
 export const generateThumbnail = async (uri: string): Promise<string> => {
   try {
-    const ImageResizer = await import('react-native-image-resizer');
-    
-    const result = await ImageResizer.default.createResizedImage(
+    const result = await ImageResizer.createResizedImage(
       uri,
       150,
       150,

@@ -7,6 +7,7 @@ jest.mock('react-native-image-picker', () => ({
 
 // Mock react-native-image-resizer
 jest.mock('react-native-image-resizer', () => ({
+  __esModule: true,
   default: {
     createResizedImage: jest.fn(),
   },

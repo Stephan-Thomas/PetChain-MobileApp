@@ -140,7 +140,7 @@ export const storeEncryptionKey = async (key: string): Promise<boolean> => {
     await Keychain.setGenericPassword(ENCRYPTION_KEY_USERNAME, key, {
       service: ENCRYPTION_KEY_SERVICE,
       accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
-      securityLevel: getSecurityLevel(),
+      securityLevel: getSecurityLevel() as unknown as Keychain.SECURITY_LEVEL,
     });
     return true;
   } catch (error) {
@@ -250,9 +250,8 @@ export const enableBiometricAuthentication = async (
     await Keychain.setGenericPassword(BIOMETRIC_USERNAME, BIOMETRIC_SECRET, {
       service: BIOMETRIC_KEYCHAIN_SERVICE,
       accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
-      accessControl: getBiometricAccessControl(),
-      authenticationType: getBiometricAuthenticationType(),
-      securityLevel: getSecurityLevel(),
+      accessControl: getBiometricAccessControl() as unknown as Keychain.ACCESS_CONTROL,
+      securityLevel: getSecurityLevel() as unknown as Keychain.SECURITY_LEVEL,
     });
 
     const credentials = await Keychain.getGenericPassword({
@@ -288,7 +287,7 @@ export const authenticateWithBiometricGate = async (
       },
     });
 
-    return !!credentials?.password;
+    return !!(credentials && 'password' in credentials && credentials.password);
   } catch {
     return false;
   }

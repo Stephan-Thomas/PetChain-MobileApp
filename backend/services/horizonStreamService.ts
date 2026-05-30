@@ -1,9 +1,17 @@
-import { Server, Horizon } from '@stellar/stellar-sdk';
+import { Horizon } from '@stellar/stellar-sdk';
 import { WebSocket } from 'ws';
 import { EventEmitter } from 'events';
 
 import config from '../config';
 import { loggerService } from './loggerService';
+
+// Support both the legacy top-level Server export (used in tests/mocks) and
+// the current Horizon.Server namespace export.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const _sdk = require('@stellar/stellar-sdk') as any;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const _StellarServer: new (url: string) => Horizon.Server =
+  _sdk.Server ?? _sdk.Horizon?.Server ?? _sdk.default?.Horizon?.Server;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -29,7 +37,7 @@ export interface PetChainTransaction {
   successful: boolean;
   operationCount: number;
   memo?: string;
-  feeCharged: string;
+  feeCharged: string | number;
   operations: Array<{
     type: string;
     sourceAccount?: string;
@@ -41,8 +49,8 @@ export interface PetChainTransaction {
 }
 
 export interface StreamEvent {
-  type: 'transaction' | 'ledger' | 'operation' | 'payment';
-  data: PetChainTransaction | Horizon.ServerApi.LedgerRecord | Horizon.ServerApi.OperationRecord | Horizon.ServerApi.PaymentOperationRecord;
+  type: 'transaction' | 'ledger' | 'operation' | 'payment' | 'status';
+  data: PetChainTransaction | Horizon.ServerApi.LedgerRecord | Horizon.ServerApi.OperationRecord | Horizon.ServerApi.PaymentOperationRecord | StreamStatus;
   cursor: string;
   timestamp: string;
 }
@@ -58,18 +66,7 @@ export interface StreamStatus {
 
 // ─── Default Configuration ────────────────────────────────────────────────────
 
-const DEFAULT_CONFIG: HorizonStreamConfig = {
-  horizonUrl: config.isDev ? 'https://horizon-testnet.stellar.org' : 'https://horizon.stellar.org',
-  networkPassphrase: config.isDev 
-    ? 'Test SDF Network ; September 2015' 
-    : 'Public Global Stellar Network ; September 2015',
-  reconnectDelay: 5000,
-  maxReconnectAttempts: 10,
-  cursorStorage: new InMemoryCursorStorage(),
-};
-
-// ─── In-Memory Cursor Storage ─────────────────────────────────────────────────
-
+// Forward-declare so DEFAULT_CONFIG can reference it
 class InMemoryCursorStorage implements CursorStorage {
   private cursors = new Map<string, string>();
 
@@ -82,10 +79,20 @@ class InMemoryCursorStorage implements CursorStorage {
   }
 }
 
+const DEFAULT_CONFIG: HorizonStreamConfig = {
+  horizonUrl: config.isDev ? 'https://horizon-testnet.stellar.org' : 'https://horizon.stellar.org',
+  networkPassphrase: config.isDev 
+    ? 'Test SDF Network ; September 2015' 
+    : 'Public Global Stellar Network ; September 2015',
+  reconnectDelay: 5000,
+  maxReconnectAttempts: 10,
+  cursorStorage: new InMemoryCursorStorage(),
+};
+
 // ─── Horizon Stream Service ───────────────────────────────────────────────────
 
 export class HorizonStreamService extends EventEmitter {
-  private server: Server;
+  private server: Horizon.Server;
   private config: HorizonStreamConfig;
   private status: StreamStatus;
   private activeStreams = new Map<string, () => void>();
@@ -95,7 +102,7 @@ export class HorizonStreamService extends EventEmitter {
   constructor(customConfig?: Partial<HorizonStreamConfig>) {
     super();
     this.config = { ...DEFAULT_CONFIG, ...customConfig };
-    this.server = new Server(this.config.horizonUrl);
+    this.server = new _StellarServer(this.config.horizonUrl);
     
     this.status = {
       isConnected: false,
@@ -316,19 +323,19 @@ export class HorizonStreamService extends EventEmitter {
   ): Promise<void> {
     const errorMessage = error instanceof Error ? error.message : 'Stream error';
     
-    loggerService.error('Stream error occurred', { 
-      streamId, 
-      error: errorMessage,
-      reconnectAttempts: this.status.reconnectAttempts 
-    });
-
     this.status.error = errorMessage;
     this.status.isConnected = false;
 
     // Attempt reconnection if under limit
     if (this.status.reconnectAttempts < this.config.maxReconnectAttempts) {
       this.status.reconnectAttempts++;
-      
+
+      loggerService.error('Stream error occurred', {
+        streamId,
+        error: errorMessage,
+        reconnectAttempts: this.status.reconnectAttempts,
+      });
+
       const delay = this.config.reconnectDelay * Math.pow(2, this.status.reconnectAttempts - 1);
       
       loggerService.info('Scheduling reconnection', { 
@@ -351,6 +358,11 @@ export class HorizonStreamService extends EventEmitter {
 
       this.reconnectTimeouts.set(streamId, timeout);
     } else {
+      loggerService.error('Stream error occurred', {
+        streamId,
+        error: errorMessage,
+        reconnectAttempts: this.status.reconnectAttempts,
+      });
       loggerService.error('Max reconnection attempts reached', { streamId });
       this.emit('maxReconnectAttemptsReached', { streamId, error: errorMessage });
     }
@@ -380,7 +392,7 @@ export class HorizonStreamService extends EventEmitter {
     return {
       id: transaction.id,
       hash: transaction.hash,
-      ledger: transaction.ledger,
+      ledger: transaction.ledger_attr ?? 0,
       createdAt: transaction.created_at,
       sourceAccount: transaction.source_account,
       successful: transaction.successful,
