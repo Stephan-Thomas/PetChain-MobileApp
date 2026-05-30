@@ -723,3 +723,72 @@ export const updateScheduledNotification = async (
 export const cancelScheduledNotification = async (notificationId: string): Promise<void> => {
   await cancelEntityNotification(notificationId);
 };
+
+// ─── Push token registration ──────────────────────────────────────────────────
+
+import apiClient from './apiClient';
+
+export type PushTopic =
+  | 'medication_reminders'
+  | 'appointment_alerts'
+  | 'sos_notifications'
+  | 'health_tips';
+
+export const ALL_PUSH_TOPICS: PushTopic[] = [
+  'medication_reminders',
+  'appointment_alerts',
+  'sos_notifications',
+  'health_tips',
+];
+
+/** Register the device's Expo push token with the backend. */
+export async function registerDeviceToken(): Promise<void> {
+  const granted = await requestPermissions();
+  if (!granted) return;
+
+  const tokenData = await Notifications.getExpoPushTokenAsync();
+  const token = tokenData.data;
+  await apiClient.post('/api/notifications/tokens', { token });
+}
+
+/** Remove a specific token (e.g. on logout). */
+export async function unregisterDeviceToken(token?: string): Promise<void> {
+  if (token) {
+    await apiClient.delete('/api/notifications/tokens', { data: { token } });
+  } else {
+    await apiClient.delete('/api/notifications/tokens/all');
+  }
+}
+
+/** Subscribe to a push topic. */
+export async function subscribeTopic(topic: PushTopic): Promise<void> {
+  await apiClient.put(`/api/notifications/subscriptions/${topic}`);
+}
+
+/** Unsubscribe from a push topic. */
+export async function unsubscribeTopic(topic: PushTopic): Promise<void> {
+  await apiClient.delete(`/api/notifications/subscriptions/${topic}`);
+}
+
+/** Get current topic subscriptions from backend. */
+export async function getTopicSubscriptions(): Promise<PushTopic[]> {
+  const res = await apiClient.get<{ success: boolean; data: { subscriptions: PushTopic[] } }>(
+    '/api/notifications/subscriptions',
+  );
+  return res.data.data.subscriptions;
+}
+
+/** Get push preferences from backend. */
+export async function getServerPreferences(): Promise<{ enabled: boolean; topics: Record<PushTopic, boolean> }> {
+  const res = await apiClient.get<{ success: boolean; data: { enabled: boolean; topics: Record<PushTopic, boolean> } }>(
+    '/api/notifications/preferences',
+  );
+  return res.data.data;
+}
+
+/** Update push preferences on backend. */
+export async function updateServerPreferences(
+  prefs: Partial<{ enabled: boolean; topics: Partial<Record<PushTopic, boolean>> }>,
+): Promise<void> {
+  await apiClient.patch('/api/notifications/preferences', prefs);
+}

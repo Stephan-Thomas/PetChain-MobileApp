@@ -24,6 +24,7 @@ module.exports = {
     '^socket\\.io-client$': '<rootDir>/src/__mocks__/socket.io-client.js',
     '^sharp$': '<rootDir>/src/__mocks__/sharp.js',
     '^multer$': '<rootDir>/src/__mocks__/multer.js',
+    '^node-fetch$': '<rootDir>/src/__mocks__/node-fetch.js',
   },
   collectCoverageFrom: [
     'src/**/*.ts',
