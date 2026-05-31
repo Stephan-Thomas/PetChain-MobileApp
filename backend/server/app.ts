@@ -50,6 +50,7 @@ import anchorRouter from '../src/routes/anchor';
 import apiKeysRouter from '../src/routes/apiKeys';
 import documentsRouter from '../src/routes/documents';
 import notificationsRouter from '../src/routes/notifications';
+import notificationTemplatesRouter from '../src/routes/notificationTemplates';
 import oauthRouter from '../src/routes/oauth';
 import familySharingRouter from './routes/familySharing';
 import federationRouter from '../src/routes/federation';
@@ -185,6 +186,7 @@ export function createApp(): Express {
   api.use('/admin', adminRouter);
   api.use('/documents', dataRateLimiter, documentsRouter);
   api.use('/notifications', dataRateLimiter, notificationsRouter);
+  api.use('/notification-templates', dataRateLimiter, notificationTemplatesRouter);
 
   app.use('/api', api);
 
