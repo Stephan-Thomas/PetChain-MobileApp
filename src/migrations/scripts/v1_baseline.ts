@@ -1,5 +1,5 @@
-import type { Migration } from '../types';
 import { getItem, setItem, removeItem } from '../../services/localDB';
+import type { Migration } from '../types';
 
 /**
  * v1 — Baseline schema.

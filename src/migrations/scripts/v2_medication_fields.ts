@@ -1,16 +1,19 @@
-import type { Migration } from '../types';
 import { getAllMedications, upsertMedication } from '../../services/localDB';
+import type { Migration } from '../types';
 
-/**
- * v2 — Backfill prescriberInfo / pharmacyInfo on medication records that
- * were saved before those fields were introduced.
- */
+type MedRecord = {
+  id: string;
+  prescriberInfo?: unknown;
+  pharmacyInfo?: unknown;
+  [k: string]: unknown;
+};
+
 const migration: Migration = {
   version: 2,
   description: 'Backfill prescriberInfo and pharmacyInfo on medication records',
 
   async up() {
-    const meds = await getAllMedications();
+    const meds = (await getAllMedications()) as MedRecord[];
     for (const med of meds) {
       let dirty = false;
       if (!med.prescriberInfo) {
@@ -26,7 +29,7 @@ const migration: Migration = {
   },
 
   async down() {
-    const meds = await getAllMedications();
+    const meds = (await getAllMedications()) as MedRecord[];
     for (const med of meds) {
       const { prescriberInfo: _p, pharmacyInfo: _ph, ...rest } = med;
       await upsertMedication(rest);

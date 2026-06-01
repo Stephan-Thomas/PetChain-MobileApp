@@ -1,6 +1,8 @@
-import axios from 'axios';
-import apiClient, { resilientRequest, getCircuitState } from '../apiClient';
 import { getToken } from '../authService';
+
+let apiClient: any;
+let resilientRequest: any;
+let getCircuitState: any;
 
 // Mock dependencies
 jest.mock('axios', () => {
@@ -19,17 +21,26 @@ jest.mock('../authService', () => ({
   getToken: jest.fn(),
 }));
 
-jest.mock('../config', () => ({
+jest.mock('../../config', () => ({
   api: {
     baseUrl: 'https://api.test.com',
     timeoutMs: 1000,
+    version: '1.0',
   },
 }));
 
 describe('apiClient', () => {
+  beforeAll(() => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require('../apiClient');
+    apiClient = mod.default;
+    resilientRequest = mod.resilientRequest;
+    getCircuitState = mod.getCircuitState;
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
-    // Reset circuit state if possible - since it's a module-level variable, 
+    // Reset circuit state if possible - since it's a module-level variable,
     // we might need to be careful or export a reset function.
     // For now, we'll just test the logic.
   });
@@ -38,21 +49,23 @@ describe('apiClient', () => {
     it('should add Authorization header if token exists', async () => {
       const mockToken = 'test-token';
       (getToken as jest.Mock).mockResolvedValue(mockToken);
-      
-      const interceptor = (apiClient.interceptors.request.use as jest.Mock).mock.calls[0][0];
-      const config = { headers: {} };
+
+      const useMock = apiClient.interceptors.request.use as jest.Mock;
+      const interceptor = useMock.mock.calls.find((call) => typeof call[0] === 'function')[0];
+      const config = { headers: {} } as any;
       const updatedConfig = await interceptor(config);
-      
+
       expect(updatedConfig.headers.Authorization).toBe(`Bearer ${mockToken}`);
     });
 
     it('should not add Authorization header if token does not exist', async () => {
       (getToken as jest.Mock).mockResolvedValue(null);
-      
-      const interceptor = (apiClient.interceptors.request.use as jest.Mock).mock.calls[0][0];
-      const config = { headers: {} };
+
+      const useMock = apiClient.interceptors.request.use as jest.Mock;
+      const interceptor = useMock.mock.calls.find((call) => typeof call[0] === 'function')[0];
+      const config = { headers: {} } as any;
       const updatedConfig = await interceptor(config);
-      
+
       expect(updatedConfig.headers.Authorization).toBeUndefined();
     });
   });
@@ -70,7 +83,7 @@ describe('apiClient', () => {
     it('should retry on 500 error and eventually succeed', async () => {
       const mockResponse = { data: 'success' };
       const error500 = { response: { status: 500 } };
-      
+
       (apiClient.request as jest.Mock)
         .mockRejectedValueOnce(error500)
         .mockResolvedValueOnce(mockResponse);
@@ -84,7 +97,9 @@ describe('apiClient', () => {
       const error400 = { response: { status: 400 } };
       (apiClient.request as jest.Mock).mockRejectedValue(error400);
 
-      await expect(resilientRequest({ url: '/test' })).rejects.toThrow('Request failed with status 400');
+      await expect(resilientRequest({ url: '/test' })).rejects.toThrow(
+        'Request failed with status 400',
+      );
       expect(apiClient.request).toHaveBeenCalledTimes(1);
     });
 
@@ -94,11 +109,17 @@ describe('apiClient', () => {
 
       // FAILURE_THRESHOLD is 5
       for (let i = 0; i < 5; i++) {
-        try { await resilientRequest({ url: '/test' }); } catch (e) {}
+        try {
+          await resilientRequest({ url: '/test' });
+        } catch {
+          // expected
+        }
       }
 
       expect(getCircuitState()).toBe('OPEN');
-      await expect(resilientRequest({ url: '/test' })).rejects.toThrow('Service temporarily unavailable');
+      await expect(resilientRequest({ url: '/test' })).rejects.toThrow(
+        'Service temporarily unavailable',
+      );
     });
   });
 });

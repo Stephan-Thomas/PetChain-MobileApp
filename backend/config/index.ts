@@ -1,7 +1,17 @@
-import Constants from 'expo-constants';
-
 // Environment type
 type Environment = 'development' | 'staging' | 'production';
+
+function getExpoVersion(): string {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const Constants = require('expo-constants') as {
+      expoConfig?: { version?: string };
+    };
+    return Constants.expoConfig?.version || '1.0.0';
+  } catch {
+    return '1.0.0';
+  }
+}
 
 // Determine current environment
 const ENV: Environment = (process.env.APP_ENV as Environment) || 'development';
@@ -35,12 +45,19 @@ const config = {
     maxRetries: CONSTANTS.MAX_RETRY_ATTEMPTS,
   },
 
+  database: {
+    url: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/petchain',
+    poolSize: Number(process.env.DB_POOL_SIZE) || 20,
+    idleTimeoutMillis: Number(process.env.DB_IDLE_TIMEOUT) || 30000,
+  },
+
   app: {
     name: process.env.APP_NAME || 'PetChain',
-    version: Constants.expoConfig?.version || '1.0.0',
+    version: getExpoVersion(),
     maxImageSizeMB: CONSTANTS.MAX_IMAGE_SIZE_MB,
     paginationLimit: CONSTANTS.PAGINATION_LIMIT,
     tokenExpiryDays: CONSTANTS.TOKEN_EXPIRY_DAYS,
+    jwtSecret: process.env.JWT_SECRET || 'petchain-dev-secret-key-change-in-prod',
   },
 } as const;
 

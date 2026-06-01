@@ -1,5 +1,9 @@
-import config from '../config';
 import * as SecureStore from 'expo-secure-store';
+
+import config from '../config';
+
+type ConfigWithPins = typeof config & { api?: { pins?: string[]; pinUrl?: string } };
+const cfg = config as ConfigWithPins;
 
 const PIN_STORE_KEY = 'cert_pins_v1';
 
@@ -9,11 +13,11 @@ const PIN_STORE_KEY = 'cert_pins_v1';
 export async function loadPins(): Promise<string[]> {
   try {
     const stored = await SecureStore.getItemAsync(PIN_STORE_KEY);
-    const cfgPins = (config as any).api?.pins ?? [];
+    const cfgPins = cfg.api?.pins ?? [];
     const storedPins = stored ? JSON.parse(stored) : [];
     return Array.from(new Set([...cfgPins, ...storedPins]));
   } catch {
-    return (config as any).api?.pins ?? [];
+    return cfg.api?.pins ?? [];
   }
 }
 
@@ -33,7 +37,7 @@ export async function savePins(pins: string[]): Promise<void> {
  * The endpoint is expected to return JSON { pins: string[] }.
  */
 export async function refreshPinsFromRemote(): Promise<string[] | null> {
-  const url = (config as any).api?.pinUrl;
+  const url = cfg.api?.pinUrl;
   if (!url) return null;
   try {
     const res = await fetch(url, { method: 'GET' });

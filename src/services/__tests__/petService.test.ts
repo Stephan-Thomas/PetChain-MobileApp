@@ -8,6 +8,12 @@ jest.mock('../apiClient', () => ({
   },
 }));
 
+jest.mock('../localDB', () => ({
+  getItem: jest.fn(),
+  setItem: jest.fn(),
+  removeItem: jest.fn(),
+}));
+
 jest.mock('../../utils/imageUtils', () => ({
   pickImage: jest.fn(),
   compressImage: jest.fn(),
@@ -16,12 +22,11 @@ jest.mock('../../utils/imageUtils', () => ({
 }));
 
 jest.mock('../qrCodeService', () => ({
-  parseQRCodeData: jest.fn(),
+  scanQRCode: jest.fn(),
 }));
 
-import { AxiosError } from 'axios';
 import apiClient from '../apiClient';
-import { parseQRCodeData } from '../qrCodeService';
+import { getItem, setItem } from '../localDB';
 import {
   getAllPets,
   getPetById,
@@ -31,13 +36,16 @@ import {
   deletePet,
   PetServiceError,
 } from '../petService';
+import { scanQRCode } from '../qrCodeService';
 
 const mockClient = jest.mocked(apiClient);
 const mockGet = mockClient.get as jest.Mock;
 const mockPost = mockClient.post as jest.Mock;
 const mockPut = mockClient.put as jest.Mock;
 const mockDelete = mockClient.delete as jest.Mock;
-const mockParseQRCodeData = parseQRCodeData as jest.Mock;
+const mockGetItem = getItem as jest.Mock;
+const mockSetItem = setItem as jest.Mock;
+const mockScanQRCode = scanQRCode as jest.Mock;
 
 function makeAxiosError(status: number, data: unknown, message = 'Request failed') {
   const err = new Error(message) as any;
@@ -57,6 +65,8 @@ const PET = {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockGetItem.mockResolvedValue(null);
+  mockSetItem.mockResolvedValue(undefined);
 });
 
 describe('petService', () => {
@@ -80,12 +90,16 @@ describe('petService', () => {
 
   it('getPetById surfaces forbidden access as PetServiceError', async () => {
     mockGet.mockRejectedValueOnce(
-      makeAxiosError(403, {
-        error: {
-          code: 'PET_ACCESS_DENIED',
-          message: 'You do not have access to this pet',
+      makeAxiosError(
+        403,
+        {
+          error: {
+            code: 'PET_ACCESS_DENIED',
+            message: 'You do not have access to this pet',
+          },
         },
-      }, 'Forbidden'),
+        'Forbidden',
+      ),
     );
 
     await expect(getPetById('pet-1')).rejects.toMatchObject({
@@ -98,52 +112,51 @@ describe('petService', () => {
     expect(mockGet).toHaveBeenCalledWith('/pets/pet-1');
   });
 
-  it('getPetByQRCode uses QR endpoint for scan data', async () => {
-    mockGet.mockResolvedValueOnce({ data: { success: true, data: PET } });
+  it('getPetByQRCode resolves cached pet data without API calls', async () => {
+    mockScanQRCode.mockReturnValueOnce({ valid: true, petId: 'pet-1' });
+    mockGetItem.mockResolvedValueOnce(JSON.stringify(PET));
 
     const result = await getPetByQRCode('scanned-qr-value');
 
-    expect(mockGet).toHaveBeenCalledWith('/pets/qr/scanned-qr-value');
+    expect(mockScanQRCode).toHaveBeenCalledWith('scanned-qr-value');
+    expect(mockGet).not.toHaveBeenCalled();
     expect(result).toEqual(PET);
   });
 
-  it('getPetByQRCode falls back to petId extraction on 404', async () => {
-    const notFoundError = makeAxiosError(404, { message: 'Not found' }, 'Not Found');
-
-    mockGet
-      .mockRejectedValueOnce(notFoundError)
-      .mockResolvedValueOnce({ data: { success: true, data: PET } });
-
-    mockParseQRCodeData.mockReturnValueOnce({ petId: 'pet-1' });
+  it('getPetByQRCode uses embedded pet data when local cache is empty', async () => {
+    mockScanQRCode.mockReturnValueOnce({
+      valid: true,
+      petId: 'pet-1',
+      petData: {
+        id: 'pet-1',
+        name: 'Milo',
+        species: 'dog',
+        microchipId: 'ABC123',
+      },
+    });
 
     const result = await getPetByQRCode('base64-payload-from-scanner');
 
-    expect(mockParseQRCodeData).toHaveBeenCalledWith('base64-payload-from-scanner');
-    expect(mockGet).toHaveBeenNthCalledWith(1, '/pets/qr/base64-payload-from-scanner');
-    expect(mockGet).toHaveBeenNthCalledWith(2, '/pets/pet-1');
-    expect(result).toEqual(PET);
+    expect(mockGet).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      id: 'pet-1',
+      name: 'Milo',
+      species: 'dog',
+      microchipId: 'ABC123',
+    });
+    expect(mockSetItem).toHaveBeenCalledWith('@pet_pet-1', expect.stringContaining('"Milo"'));
   });
 
-  it('getPetByQRCode surfaces unauthorized access without fallback when lookup is denied', async () => {
-    mockGet.mockRejectedValueOnce(
-      makeAxiosError(401, {
-        error: {
-          code: 'UNAUTHORIZED',
-          message: 'Authentication required',
-        },
-      }, 'Unauthorized'),
-    );
+  it('getPetByQRCode rejects invalid QR data without API calls', async () => {
+    mockScanQRCode.mockReturnValueOnce({ valid: false, error: 'bad qr' });
 
     await expect(getPetByQRCode('scanned-qr-value')).rejects.toMatchObject({
       name: 'PetServiceError',
-      code: 'UNAUTHORIZED',
-      message: 'Authentication required',
-      status: 401,
+      code: 'INVALID_QR_CODE',
+      message: 'bad qr',
     });
 
-    expect(mockParseQRCodeData).not.toHaveBeenCalled();
-    expect(mockGet).toHaveBeenCalledTimes(1);
-    expect(mockGet).toHaveBeenCalledWith('/pets/qr/scanned-qr-value');
+    expect(mockGet).not.toHaveBeenCalled();
   });
 
   it('createPet posts payload and returns typed data', async () => {

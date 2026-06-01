@@ -1,3 +1,4 @@
+import * as StellarSdk from '@stellar/stellar-sdk';
 import axios, { type AxiosResponse } from 'axios';
 import CryptoJS from 'crypto-js';
 
@@ -52,6 +53,26 @@ export type MedicalRecordWithChainData = MedicalRecord & {
 
 const API_BASE_URL = 'https://api.petchain.app/api';
 const CACHE_TTL_MS = 2 * 60 * 1000;
+
+// Stellar Network Configuration
+const STELLAR_NETWORK: string = 'TESTNET'; // Change to 'PUBLIC' for production
+const HORIZON_URL =
+  STELLAR_NETWORK === 'PUBLIC'
+    ? 'https://horizon.stellar.org'
+    : 'https://horizon-testnet.stellar.org';
+
+// Initialize Stellar Server
+let stellarServer: StellarSdk.Horizon.Server | null = null;
+
+const getStellarServer = (): StellarSdk.Horizon.Server => {
+  if (!stellarServer) {
+    stellarServer = new StellarSdk.Horizon.Server(HORIZON_URL);
+    // Configure network passphrase
+    const _networkPassphrase =
+      STELLAR_NETWORK === 'PUBLIC' ? StellarSdk.Networks.PUBLIC : StellarSdk.Networks.TESTNET;
+  }
+  return stellarServer;
+};
 
 const responseCache = new Map<string, { data: unknown; expiresAt: number }>();
 const inFlightRequests = new Map<string, Promise<unknown>>();
@@ -153,7 +174,7 @@ const sortObject = (value: unknown): unknown => {
   if (value && typeof value === 'object') {
     const obj: Record<string, unknown> = {};
     for (const key of Object.keys(value as object).sort()) {
-      obj[key] = sortObject((value as any)[key]);
+      obj[key] = sortObject((value as Record<string, unknown>)[key]);
     }
     return obj;
   }
@@ -321,19 +342,180 @@ export const getStellarNetworkInfo = async (): Promise<{
     latestLedger: number;
   }>(cacheKey, async () => {
     try {
-      const response: AxiosResponse<{
-        network: string;
-        horizonUrl: string;
-        passphrase: string;
-        currentLedger: number;
-        latestLedger: number;
-      }> = await axios.get(`${API_BASE_URL}/blockchain/network/info`);
-      return response.data;
+      const server = getStellarServer();
+      const ledgers = await server.ledgers().order('desc').limit(1).call();
+      const latestLedger = ledgers.records[0];
+
+      return {
+        network: STELLAR_NETWORK,
+        horizonUrl: HORIZON_URL,
+        passphrase:
+          STELLAR_NETWORK === 'PUBLIC' ? StellarSdk.Networks.PUBLIC : StellarSdk.Networks.TESTNET,
+        currentLedger: latestLedger.sequence,
+        latestLedger: latestLedger.sequence,
+      };
     } catch (error) {
       handleBlockchainError(error);
-      throw error; // unreachable but satisfies type checker
+      throw error;
     }
   });
+};
+
+/**
+ * Create a new Stellar account (keypair).
+ */
+export const createStellarAccount = (): {
+  publicKey: string;
+  secretKey: string;
+} => {
+  const keypair = StellarSdk.Keypair.random();
+  return {
+    publicKey: keypair.publicKey(),
+    secretKey: keypair.secret(),
+  };
+};
+
+/**
+ * Get account details from Stellar network.
+ */
+export const getStellarAccountDetails = async (
+  publicKey: string,
+): Promise<StellarSdk.Horizon.AccountResponse> => {
+  try {
+    const server = getStellarServer();
+    const account = await server.loadAccount(publicKey);
+    return account;
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response?.status === 404) {
+      throw new BlockchainServiceError('Account not found on Stellar network', 'ACCOUNT_NOT_FOUND');
+    }
+    handleBlockchainError(error);
+    throw error;
+  }
+};
+
+/**
+ * Fund a testnet account using Friendbot (testnet only).
+ */
+export const fundTestnetAccount = async (publicKey: string): Promise<boolean> => {
+  if (STELLAR_NETWORK !== 'TESTNET') {
+    throw new BlockchainServiceError('Friendbot only available on testnet', 'INVALID_NETWORK');
+  }
+
+  try {
+    await axios.get(`https://friendbot.stellar.org?addr=${encodeURIComponent(publicKey)}`);
+    return true;
+  } catch {
+    throw new BlockchainServiceError('Failed to fund testnet account', 'FUNDING_FAILED');
+  }
+};
+
+/**
+ * Submit a transaction to Stellar network.
+ */
+export const submitStellarTransaction = async (
+  transaction: StellarSdk.Transaction,
+): Promise<StellarSdk.Horizon.HorizonApi.SubmitTransactionResponse> => {
+  try {
+    const server = getStellarServer();
+    const result = await server.submitTransaction(transaction);
+    return result;
+  } catch (error) {
+    if (
+      error &&
+      (error as { response?: { data?: { extras?: { result_codes?: { transaction?: string } } } } })
+        .response?.data
+    ) {
+      const txError = error as {
+        response: { data: { extras?: { result_codes?: { transaction?: string } } } };
+        message?: string;
+      };
+      throw new BlockchainServiceError(
+        `Transaction failed: ${txError.response.data.extras?.result_codes?.transaction}`,
+        'TRANSACTION_FAILED',
+      );
+    }
+    handleBlockchainError(error);
+    throw error;
+  }
+};
+
+/**
+ * Build and submit a payment transaction.
+ */
+export const sendPayment = async (
+  sourceSecretKey: string,
+  destinationPublicKey: string,
+  amount: string,
+  memo?: string,
+): Promise<StellarSdk.Horizon.HorizonApi.SubmitTransactionResponse> => {
+  try {
+    const server = getStellarServer();
+    const sourceKeypair = StellarSdk.Keypair.fromSecret(sourceSecretKey);
+    const sourceAccount = await server.loadAccount(sourceKeypair.publicKey());
+
+    const transaction = new StellarSdk.TransactionBuilder(sourceAccount, {
+      fee: StellarSdk.BASE_FEE,
+      networkPassphrase:
+        STELLAR_NETWORK === 'PUBLIC' ? StellarSdk.Networks.PUBLIC : StellarSdk.Networks.TESTNET,
+    })
+      .addOperation(
+        StellarSdk.Operation.payment({
+          destination: destinationPublicKey,
+          asset: StellarSdk.Asset.native(),
+          amount: amount,
+        }),
+      )
+      .setTimeout(30);
+
+    if (memo) {
+      transaction.addMemo(StellarSdk.Memo.text(memo));
+    }
+
+    const builtTransaction = transaction.build();
+    builtTransaction.sign(sourceKeypair);
+
+    return await submitStellarTransaction(builtTransaction);
+  } catch (error) {
+    handleBlockchainError(error);
+    throw error;
+  }
+};
+
+/**
+ * Store data on Stellar using manage data operation.
+ */
+export const storeDataOnStellar = async (
+  sourceSecretKey: string,
+  dataName: string,
+  dataValue: string,
+): Promise<StellarSdk.Horizon.HorizonApi.SubmitTransactionResponse> => {
+  try {
+    const server = getStellarServer();
+    const sourceKeypair = StellarSdk.Keypair.fromSecret(sourceSecretKey);
+    const sourceAccount = await server.loadAccount(sourceKeypair.publicKey());
+
+    const transaction = new StellarSdk.TransactionBuilder(sourceAccount, {
+      fee: StellarSdk.BASE_FEE,
+      networkPassphrase:
+        STELLAR_NETWORK === 'PUBLIC' ? StellarSdk.Networks.PUBLIC : StellarSdk.Networks.TESTNET,
+    })
+      .addOperation(
+        StellarSdk.Operation.manageData({
+          name: dataName,
+          value: dataValue,
+        }),
+      )
+      .setTimeout(30)
+      .build();
+
+    transaction.sign(sourceKeypair);
+
+    return await submitStellarTransaction(transaction);
+  } catch (error) {
+    handleBlockchainError(error);
+    throw error;
+  }
 };
 
 /**
@@ -376,6 +558,7 @@ export const batchVerifyRecords = async (
 export const clearBlockchainCache = (): void => {
   responseCache.clear();
   inFlightRequests.clear();
+  stellarServer = null; // Reset Stellar server instance
 };
 
 export const invalidateBlockchainCacheKey = (key: string): void => {
