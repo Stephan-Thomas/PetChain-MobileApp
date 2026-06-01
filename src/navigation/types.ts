@@ -52,6 +52,7 @@ export type PetStackParamList = {
   TravelCertificate: { petId: string; petName?: string };
   DosageCalculator: { petId?: string; species?: string; weightKg?: number };
   ReconciliationReport: { reportId?: string };
+  TrustlineManager: undefined;
   NearbyVet: undefined;
   VetDirectory: undefined;
   PrivacyDashboard: undefined;

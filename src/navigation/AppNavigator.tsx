@@ -37,6 +37,7 @@ import TravelCertificateScreen from '../screens/TravelCertificateScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import ReferralScreen from '../screens/ReferralScreen';
 import ReconciliationScreen from '../screens/ReconciliationScreen';
+import TrustlineScreen from '../screens/TrustlineScreen';
 import QRScannerScreen from '../screens/QRScannerScreen';
 import VaccinationScreen from '../screens/VaccinationScreen';
 import TelemedicineScreen from '../screens/TelemedicineScreen';
@@ -172,6 +173,9 @@ function PetNavigator() {
       </PetStack.Screen>
       <PetStack.Screen name="ReconciliationReport" options={{ title: 'Record Reconciliation' }}>
         {({ navigation }) => <ReconciliationScreen onBack={() => navigation.goBack()} />}
+      </PetStack.Screen>
+      <PetStack.Screen name="TrustlineManager" options={{ title: 'Stellar Trustlines' }}>
+        {({ navigation }) => <TrustlineScreen onBack={() => navigation.goBack()} />}
       </PetStack.Screen>
       <PetStack.Screen
         name="NotificationPreferences"
