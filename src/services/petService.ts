@@ -3,7 +3,8 @@ import axios from 'axios';
 import apiClient from './apiClient';
 import { getItem, setItem, removeItem } from './localDB';
 import offlineQueue from './offlineQueue';
-import { parseQRCodeData } from './qrCodeService';
+import { scanQRCode, type QRScanResult } from './qrCodeService';
+import type { Species } from '../models/Pet';
 import { logError } from '../utils/errorLogger';
 import { pickImage, compressImage, generateThumbnail, uploadToStorage } from '../utils/imageUtils';
 
@@ -20,9 +21,10 @@ export interface PetOwnerSummary {
 export interface Pet {
   id: string;
   name: string;
-  species: string;
+  species: Species;
   breed?: string;
   dateOfBirth?: string;
+  weightKg?: number;
   microchipId?: string;
   photoUrl?: string;
   thumbnailUrl?: string;
@@ -34,9 +36,10 @@ export interface Pet {
 
 export interface CreatePetInput {
   name: string;
-  species: string;
+  species: Species;
   breed?: string;
   dateOfBirth?: string;
+  weightKg?: number;
   microchipId?: string;
   photoUrl?: string;
   thumbnailUrl?: string;
@@ -45,9 +48,10 @@ export interface CreatePetInput {
 
 export interface UpdatePetInput {
   name?: string;
-  species?: string;
+  species?: Species;
   breed?: string;
   dateOfBirth?: string;
+  weightKg?: number;
   microchipId?: string;
   photoUrl?: string;
   thumbnailUrl?: string;
@@ -116,7 +120,7 @@ function unwrapApiData<T>(payload: ApiResponse<T> | T): T {
     typeof payload === 'object' &&
     payload !== null &&
     'success' in payload &&
-    (payload as any).success === true &&
+    (payload as ApiResponse<T>).success === true &&
     'data' in payload
   ) {
     return (payload as ApiResponse<T>).data;
@@ -124,12 +128,29 @@ function unwrapApiData<T>(payload: ApiResponse<T> | T): T {
   return payload as T;
 }
 
-// 👉 IMPORTANT FIX: no spread in function call context
-function logPetError(error: Error, context: Record<string, any>) {
+function petFromQRData(scan: QRScanResult): Pet | null {
+  if (!scan.petId || !scan.petData) return null;
+
+  const now = new Date().toISOString();
+  return {
+    id: scan.petId,
+    name: scan.petData.name || 'Unknown Pet',
+    species: scan.petData.species || 'other',
+    breed: scan.petData.breed,
+    weightKg: scan.petData.weightKg,
+    microchipId: scan.petData.microchipId,
+    photoUrl: scan.petData.photoUrl,
+    ownerId: scan.petData.ownerId || '',
+    createdAt: scan.petData.createdAt || now,
+    updatedAt: scan.petData.updatedAt || now,
+  };
+}
+
+function logPetError(error: Error, context: Record<string, unknown>) {
   logError(error, context);
 }
 
-function toPetServiceError(error: unknown, context: Record<string, any>): PetServiceError {
+function toPetServiceError(error: unknown, context: Record<string, unknown>): PetServiceError {
   if (axios.isAxiosError(error)) {
     const status = error.response?.status;
 
@@ -222,34 +243,32 @@ export async function getPetByQRCode(qrCode: string): Promise<Pet> {
     throw err;
   }
 
-  try {
-    const response = await apiClient.get(`/pets/qr/${encodeURIComponent(value)}`);
-    const pet = unwrapApiData(response.data);
-    await setItem(`${PET_CACHE_PREFIX}${pet.id}`, JSON.stringify(pet));
-    return pet;
-  } catch (error) {
-    if (axios.isAxiosError(error)) {
-      if (error.response?.status === 404) {
-        const parsed = parseQRCodeData(value);
-        if (parsed?.petId) {
-          return getPetById(parsed.petId);
-        }
-      }
-      // If offline
-      if (!error.response) {
-        const parsed = parseQRCodeData(value);
-        if (parsed?.petId) {
-          const cached = await getCachedPet(parsed.petId);
-          if (cached) return cached;
-        }
-      }
-    }
-
-    throw toPetServiceError(error, {
-      action: 'get_pet_by_qr',
-      qrCode: value,
-    });
+  const scan = scanQRCode(value);
+  if (!scan.valid || !scan.petId) {
+    const err = new PetServiceError(scan.error || 'Invalid QR code', 'INVALID_QR_CODE');
+    logPetError(err, { service: 'petService', action: 'qr_parse' });
+    throw err;
   }
+
+  const cached = await getCachedPet(scan.petId);
+  if (cached) return cached;
+
+  const cachedList = await getCachedPets();
+  const listMatch = cachedList.find((pet) => pet.id === scan.petId);
+  if (listMatch) {
+    await setItem(`${PET_CACHE_PREFIX}${listMatch.id}`, JSON.stringify(listMatch));
+    return listMatch;
+  }
+
+  const embeddedPet = petFromQRData(scan);
+  if (embeddedPet) {
+    await setItem(`${PET_CACHE_PREFIX}${embeddedPet.id}`, JSON.stringify(embeddedPet));
+    return embeddedPet;
+  }
+
+  const err = new PetServiceError('Pet not found in local storage', 'LOCAL_PET_NOT_FOUND');
+  logPetError(err, { service: 'petService', action: 'qr_local_lookup', petId: scan.petId });
+  throw err;
 }
 
 export async function createPet(data: CreatePetInput): Promise<Pet> {
@@ -269,7 +288,7 @@ export async function createPet(data: CreatePetInput): Promise<Pet> {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-      await offlineQueue.enqueue('pet', 'create', newPet as any);
+      await offlineQueue.enqueue('pet', 'create', newPet as unknown as Record<string, unknown>);
       await setItem(`${PET_CACHE_PREFIX}${tempId}`, JSON.stringify(newPet));
 
       // Update pets list cache
@@ -346,22 +365,24 @@ export async function deletePet(petId: string): Promise<void> {
   }
 }
 
-export async function uploadPetPhoto(petId: string): Promise<string | null> {
+export async function uploadPetPhoto(
+  petId: string,
+): Promise<{ photoUrl: string; thumbnailUrl: string } | null> {
   try {
     const image = await pickImage();
     if (!image) return null;
 
     const compressed = await compressImage(image.uri);
-    const thumbnail = await generateThumbnail(image.uri);
+    const _thumbnail = await generateThumbnail(image.uri);
 
-    const upload = await uploadToStorage(compressed.uri, petId, thumbnail);
+    const upload = await uploadToStorage(compressed.uri, petId);
 
     await updatePet(petId, {
       photoUrl: upload.url,
       thumbnailUrl: upload.thumbnailUrl,
     });
 
-    return upload.url;
+    return { photoUrl: upload.url, thumbnailUrl: upload.thumbnailUrl };
   } catch (error) {
     throw toPetServiceError(error, {
       action: 'upload_pet_photo',
@@ -369,3 +390,16 @@ export async function uploadPetPhoto(petId: string): Promise<string | null> {
     });
   }
 }
+
+// Default export for screens that import petService as default
+const petService = {
+  getAllPets,
+  getPetById,
+  getPetByQRCode,
+  createPet,
+  updatePet,
+  deletePet,
+  uploadPetPhoto,
+};
+
+export default petService;

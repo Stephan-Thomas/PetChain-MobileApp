@@ -1,53 +1,61 @@
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
 import express from 'express';
 
+import type { AuditableRequest } from '../../middleware/auditLog';
+import { authenticateJWT, authorizeRoles, type AuthenticatedRequest } from '../../middleware/auth';
 import { UserRole } from '../../models/UserRole';
+import referralService from '../../services/referralService';
+import { userRepository, type DBUser } from '../../src/repositories/userRepository';
 import { ok, sendError } from '../response';
 import { store, type StoredUser } from '../store';
 
 const router = express.Router();
 
-function sanitize(u: StoredUser) {
+function sanitize(u: DBUser) {
+  const { password_hash: _p, ...rest } = u;
+  return {
+    ...rest,
+    isEmailVerified: u.is_email_verified,
+    lastLoginAt: u.last_login_at,
+    createdAt: u.created_at,
+    updatedAt: u.updated_at,
+  };
+}
+
+function sanitizeStored(u: StoredUser) {
   const { passwordHash: _p, ...rest } = u;
   return rest;
 }
 
-function resolveUserFromAuth(authHeader: string | undefined): StoredUser | null {
-  if (!authHeader?.startsWith('Bearer ')) return null;
-  const token = authHeader.slice(7).trim();
-  if (!token) return null;
-  if (token.startsWith('mock-')) {
-    const id = token.slice('mock-'.length);
-    return store.users.get(id) ?? null;
-  }
-  const first = [...store.users.values()][0];
-  return first ?? null;
-}
-
-router.get('/me', (req, res) => {
-  const user = resolveUserFromAuth(req.headers.authorization);
-  if (!user) return sendError(res, 401, 'UNAUTHORIZED', 'Missing or invalid Authorization header');
-  return res.json(ok(sanitize(user)));
+router.get('/me', authenticateJWT, (req: AuthenticatedRequest, res) => {
+  const user = store.users.get(req.user!.id);
+  if (!user) return sendError(res, 404, 'NOT_FOUND', 'User not found');
+  (req as AuditableRequest).audit?.('user.login', 'user', req.user!.id);
+  return res.json(ok(sanitizeStored(user)));
 });
 
-router.get('/', (req, res) => {
-  const role = req.query.role as string | undefined;
-  const search = (req.query.search as string | undefined)?.toLowerCase();
-  const page = Math.max(1, Number(req.query.page) || 1);
-  const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
+router.get('/', authenticateJWT, authorizeRoles(UserRole.ADMIN), async (req, res) => {
+  const q = req.query as Record<string, string | undefined>;
+  const role = q.role;
+  const search = q.search?.toLowerCase();
+  const page = Math.max(1, Number(q.page) || 1);
+  const limit = Math.min(100, Math.max(1, Number(q.limit) || 20));
 
-  let list = [...store.users.values()].map(sanitize);
-  if (role) list = list.filter((u) => u.role === role);
+  let users = await userRepository.findAll();
+
+  if (role) users = users.filter((u) => u.role === role);
   if (search) {
-    list = list.filter(
+    users = users.filter(
       (u) =>
         u.email.toLowerCase().includes(search) ||
         u.name.toLowerCase().includes(search) ||
         u.id.toLowerCase().includes(search),
     );
   }
-  const total = list.length;
+
+  const total = users.length;
   const start = (page - 1) * limit;
-  const slice = list.slice(start, start + limit);
+  const slice = users.slice(start, start + limit).map(sanitize);
   const totalPages = Math.ceil(total / limit) || 1;
 
   return res.json({
@@ -65,63 +73,106 @@ router.get('/', (req, res) => {
   });
 });
 
-router.get('/:id', (req, res) => {
+router.get('/:id', authenticateJWT, (req, res) => {
   const user = store.users.get(req.params.id);
-  if (!user) return sendError(res, 404, 'NOT_FOUND', 'User not found');
-  return res.json(ok(sanitize(user)));
+  if (!user || user.deletedAt) return sendError(res, 404, 'NOT_FOUND', 'User not found');
+  return res.json(ok(sanitizeStored(user)));
 });
 
-router.post('/', (req, res) => {
-  const { email, name, phone, role } = req.body as {
-    email?: string;
-    name?: string;
-    phone?: string;
-    role?: string;
-  };
+router.post('/', async (req, res) => {
+  const { email, name, phone, role, referralCode, deviceFingerprint } = req.body;
   if (!email?.trim() || !name?.trim()) {
     return sendError(res, 400, 'VALIDATION_ERROR', 'email and name are required');
   }
-  if ([...store.users.values()].some((u) => u.email.toLowerCase() === email.trim().toLowerCase())) {
+
+  const existing = await userRepository.findByEmail(email.trim().toLowerCase());
+  if (existing) {
     return sendError(res, 409, 'CONFLICT', 'Email already registered');
   }
-  const t = new Date().toISOString();
+
   const id = store.newId();
-  const row: StoredUser = {
+  const user = await userRepository.create({
+    id,
+    email: email.trim(),
+    name: name.trim(),
+    phone: phone?.trim(),
+    role: (role as UserRole) || UserRole.OWNER,
+    is_email_verified: false,
+  });
+
+  store.users.set(id, {
     id,
     email: email.trim(),
     name: name.trim(),
     phone: phone?.trim(),
     role: (role as UserRole) || UserRole.OWNER,
     pets: [],
-    createdAt: t,
-    updatedAt: t,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
     isEmailVerified: false,
-  };
-  store.users.set(id, row);
-  return res.status(201).json(ok(sanitize(row), 'User created'));
+    twoFactorEnabled: false,
+  });
+
+  referralService.ensureReferralCode(id);
+
+  if (typeof referralCode === 'string' && referralCode.trim()) {
+    try {
+      referralService.createPendingReferral(referralCode, id, {
+        deviceFingerprint: typeof deviceFingerprint === 'string' ? deviceFingerprint : undefined,
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent'),
+      });
+    } catch {
+      // Referral attribution should not block account creation.
+    }
+  }
+
+  (req as AuditableRequest).audit?.('user.created', 'user', id, { email: email.trim() });
+  return res.status(201).json(ok(sanitize(user), 'User created'));
 });
 
-router.put('/:id', (req, res) => {
+router.put('/:id', authenticateJWT, (req: AuthenticatedRequest, res) => {
   const user = store.users.get(req.params.id);
   if (!user) return sendError(res, 404, 'NOT_FOUND', 'User not found');
+
+  // Only admin or the user themselves can update
+  if (req.user!.role !== UserRole.ADMIN && req.user!.id !== req.params.id) {
+    return sendError(res, 403, 'FORBIDDEN', 'You do not have permission to update this user');
+  }
+
   const { name, phone, role, isEmailVerified } = req.body as Partial<StoredUser>;
   const next: StoredUser = {
     ...user,
     ...(name !== undefined ? { name: String(name) } : {}),
     ...(phone !== undefined ? { phone: String(phone) } : {}),
-    ...(role !== undefined ? { role: role as UserRole } : {}),
-    ...(isEmailVerified !== undefined ? { isEmailVerified: Boolean(isEmailVerified) } : {}),
+    ...(role !== undefined && req.user!.role === UserRole.ADMIN ? { role: role as UserRole } : {}),
+    ...(isEmailVerified !== undefined && req.user!.role === UserRole.ADMIN
+      ? { isEmailVerified: Boolean(isEmailVerified) }
+      : {}),
     updatedAt: new Date().toISOString(),
   };
   store.users.set(user.id, next);
-  return res.json(ok(sanitize(next), 'User updated'));
+  (req as AuditableRequest).audit?.('user.updated', 'user', user.id);
+  return res.json(ok(sanitizeStored(next), 'User updated'));
 });
 
-router.delete('/:id', (req, res) => {
-  if (!store.users.delete(req.params.id)) {
-    return sendError(res, 404, 'NOT_FOUND', 'User not found');
-  }
-  return res.json(ok(null, 'User deleted'));
-});
+router.delete(
+  '/:id',
+  authenticateJWT,
+  authorizeRoles(UserRole.ADMIN),
+  (req: AuthenticatedRequest, res) => {
+    const user = store.users.get(req.params.id);
+    if (!user) {
+      return sendError(res, 404, 'NOT_FOUND', 'User not found');
+    }
+    if (user.deletedAt) {
+      return res.json(ok(null, 'User already archived'));
+    }
+    const archivedAt = new Date().toISOString();
+    store.users.set(user.id, { ...user, deletedAt: archivedAt, updatedAt: archivedAt });
+    (req as AuditableRequest).audit?.('user.deleted', 'user', req.params.id);
+    return res.json(ok(null, 'User archived'));
+  },
+);
 
 export default router;

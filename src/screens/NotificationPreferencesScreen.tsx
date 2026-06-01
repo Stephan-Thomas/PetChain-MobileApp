@@ -1,3 +1,4 @@
+import * as Notifications from 'expo-notifications';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -12,6 +13,7 @@ import {
   View,
 } from 'react-native';
 
+import PermissionRationaleModal from '../components/PermissionRationaleModal';
 import {
   getPreferences,
   savePreferences,
@@ -28,6 +30,8 @@ const NotificationPreferencesScreen: React.FC<Props> = ({ onBack }) => {
   const [pets, setPets] = useState<Pet[]>([]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [showRationale, setShowRationale] = useState(false);
+  const [notifPermissionDenied, setNotifPermissionDenied] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -40,12 +44,29 @@ const NotificationPreferencesScreen: React.FC<Props> = ({ onBack }) => {
     })();
   }, []);
 
-  const update = useCallback(<K extends keyof NotificationPreferences>(
-    key: K,
-    value: NotificationPreferences[K],
-  ) => {
-    setPrefs((prev) => (prev ? { ...prev, [key]: value } : prev));
-  }, []);
+  const update = useCallback(
+    <K extends keyof NotificationPreferences>(key: K, value: NotificationPreferences[K]) => {
+      setPrefs((prev) => (prev ? { ...prev, [key]: value } : prev));
+    },
+    [],
+  );
+
+  const requestNotificationPermission = async (): Promise<boolean> => {
+    const { status } = await Notifications.requestPermissionsAsync();
+    return status === 'granted';
+  };
+
+  const handleToggleMedicationReminders = async (value: boolean) => {
+    if (value) {
+      const { status } = await Notifications.getPermissionsAsync();
+      if (status !== 'granted') {
+        setNotifPermissionDenied(status === 'denied');
+        setShowRationale(true);
+        return;
+      }
+    }
+    update('medicationReminders', value);
+  };
 
   const getPetOverride = (petId: string) =>
     prefs?.petOverrides?.find((o) => o.petId === petId) ?? { petId };
@@ -127,6 +148,22 @@ const NotificationPreferencesScreen: React.FC<Props> = ({ onBack }) => {
 
   return (
     <View style={styles.container}>
+      <PermissionRationaleModal
+        visible={showRationale}
+        permissionType="notifications"
+        showSettings={notifPermissionDenied}
+        onAllow={async () => {
+          setShowRationale(false);
+          const granted = await requestNotificationPermission();
+          if (granted) {
+            update('medicationReminders', true);
+          } else {
+            setNotifPermissionDenied(true);
+            setShowRationale(true);
+          }
+        }}
+        onDeny={() => setShowRationale(false)}
+      />
       <View style={styles.header}>
         <TouchableOpacity
           onPress={onBack}
@@ -140,14 +177,13 @@ const NotificationPreferencesScreen: React.FC<Props> = ({ onBack }) => {
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
-
         {/* ── By Type ── */}
         <SectionHeader title="By Type" />
         <View style={styles.card}>
           <Row
             label="Medication Reminders"
             value={prefs.medicationReminders}
-            onValueChange={(v) => update('medicationReminders', v)}
+            onValueChange={(v) => void handleToggleMedicationReminders(v)}
           />
           <View style={styles.sep} />
           <Row
@@ -222,9 +258,7 @@ const NotificationPreferencesScreen: React.FC<Props> = ({ onBack }) => {
                   />
                 </View>
               </View>
-              <Text style={styles.hint}>
-                Notifications will be suppressed during quiet hours.
-              </Text>
+              <Text style={styles.hint}>Notifications will be suppressed during quiet hours.</Text>
             </>
           )}
         </View>

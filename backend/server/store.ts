@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 
+import type { ApiKey, ApiKeyUsageRecord } from '../models/ApiKey';
 import { AppointmentStatus, AppointmentType } from '../models/Appointment';
 import { UserRole } from '../models/UserRole';
 
@@ -12,9 +13,17 @@ export interface StoredUser {
   pets: Array<{ id: string; name?: string }>;
   createdAt: string;
   updatedAt: string;
+  deletedAt?: string;
   isEmailVerified: boolean;
   lastLoginAt?: string;
   passwordHash?: string;
+  // 2FA fields
+  twoFactorEnabled: boolean;
+  twoFactorSecret?: string; // encrypted TOTP secret (never exposed in API)
+  twoFactorBackupCodes?: string[]; // bcrypt-hashed backup codes
+  twoFactorPendingSecret?: string; // secret during setup (before confirmation)
+  recoveryToken?: string; // bcrypt-hashed recovery token
+  recoveryTokenExpiresAt?: number; // epoch ms
 }
 
 export interface StoredPet {
@@ -23,6 +32,7 @@ export interface StoredPet {
   species: string;
   breed?: string;
   dateOfBirth?: string;
+  weightKg?: number;
   microchipId?: string;
   photoUrl?: string;
   thumbnailUrl?: string;
@@ -43,6 +53,18 @@ export interface StoredMedicalRecord {
   nextVisitDate?: string;
   createdAt: string;
   updatedAt: string;
+
+  // Blockchain verification fields
+  blockchainTxHash?: string; // Stellar transaction hash
+  blockchainHash?: string; // Hash stored on-chain
+  isBlockchainVerified?: boolean; // Verified flag (backend-computed)
+  blockchainVerifiedAt?: string; // When verification was last performed
+
+  // Federated vet signature fields
+  vetSignature?: string; // Ed25519 signature over record hash
+  vetFederatedAddress?: string; // e.g. dr.smith*petchain.app
+  vetPublicKey?: string; // Stellar public key of signing vet
+  vetSignedAt?: string; // When the vet signed this record
 }
 
 export interface StoredAppointment {
@@ -59,6 +81,60 @@ export interface StoredAppointment {
   updatedAt: string;
   cancelledAt?: string;
   cancellationReason?: string;
+  isTelemedicine?: boolean;
+  videoCallUrl?: string;
+  videoProvider?: 'jitsi' | 'zoom';
+  timeZone?: string;
+  questionnaireDueAt?: string;
+  questionnaireSentAt?: string;
+  questionnaireRespondedAt?: string;
+  questionnaireResponses?: Record<string, string>;
+  noShowReportedAt?: string;
+  rescheduledFrom?: string;
+}
+
+export interface StoredBackup {
+  userId: string;
+  createdAt: string;
+  payload: Record<string, unknown>;
+}
+
+export interface StoredPetQrIdentity {
+  petId: string;
+  token: string;
+  issuedAt: string;
+  revokedAt?: string;
+}
+
+export interface StoredEmergencySession {
+  id: string;
+  userId?: string;
+  message: string;
+  latitude: number;
+  longitude: number;
+  accuracy?: number;
+  shareToken: string;
+  createdAt: string;
+  expiresAt: string;
+  cancelledAt?: string;
+  contacts: Array<{ name: string; phoneNumber: string; pushToken?: string }>;
+  updates: Array<{ latitude: number; longitude: number; accuracy?: number; recordedAt: string }>;
+}
+
+export interface StoredHealthPredictionAlert {
+  id: string;
+  petId: string;
+  ownerId: string;
+  predictedIssue: string;
+  riskScore: number;
+  riskLevel: 'medium' | 'high';
+  contributingFactors: string[];
+  modelVersion: string;
+  status: 'active' | 'dismissed';
+  createdAt: string;
+  dismissedAt?: string;
+  feedback?: 'helpful' | 'not_helpful' | 'already_known' | 'false_alarm';
+  feedbackNotes?: string;
 }
 
 /** Matches `backend/services/medicationService` client expectations. */
@@ -91,8 +167,10 @@ function seed() {
     pets: [{ id: petId, name: 'Buddy' }],
     createdAt: t,
     updatedAt: t,
+    deletedAt: undefined,
     isEmailVerified: true,
     lastLoginAt: t,
+    twoFactorEnabled: false,
   });
 
   const pets = new Map<string, StoredPet>();
@@ -122,6 +200,11 @@ function seed() {
     nextVisitDate: '2027-01-01',
     createdAt: t,
     updatedAt: t,
+    // Blockchain fields not set for demo record initially
+    blockchainTxHash: undefined,
+    blockchainHash: undefined,
+    isBlockchainVerified: false,
+    blockchainVerifiedAt: undefined,
   });
 
   const appointments = new Map<string, StoredAppointment>();
@@ -157,11 +240,57 @@ function seed() {
 
 const state = seed();
 
+const backups = new Map<string, StoredBackup>();
+const petQrIdentities = new Map<string, StoredPetQrIdentity>();
+const emergencySessions = new Map<string, StoredEmergencySession>();
+const healthPredictionAlerts = new Map<string, StoredHealthPredictionAlert>();
+
+// ─── Travel Certificates ──────────────────────────────────────────────────────
+
+export interface StoredTravelCertificate {
+  id: string;
+  petId: string;
+  petName: string;
+  destinationCountryCode: string;
+  destinationCountryName: string;
+  travelDate: string;
+  generatedAt: string;
+  status: 'draft' | 'ready' | 'incomplete' | 'anchored' | 'anchor_failed';
+  requirementChecks: Array<{
+    requirementType: 'vaccination' | 'health_check' | 'document';
+    requirementName: string;
+    met: boolean;
+    details?: string;
+    satisfiedAt?: string;
+    actionRequired?: string;
+  }>;
+  complianceScore: number;
+  pdfUrl?: string;
+  blockchainTxHash?: string;
+  blockchainHash?: string;
+  isBlockchainAnchored: boolean;
+  blockchainAnchoredAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const travelCertificates = new Map<string, StoredTravelCertificate>();
+
+const apiKeys = new Map<string, ApiKey>();
+const apiKeyUsage: ApiKeyUsageRecord[] = [];
+
 export function newId(): string {
   return randomUUID();
 }
 
 export const store = {
   ...state,
+  backups,
+  petQrIdentities,
+  emergencySessions,
+  healthPredictionAlerts,
+  travelCertificates,
+  apiKeys,
+  apiKeyUsage,
   newId,
 };

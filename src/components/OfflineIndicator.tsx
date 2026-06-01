@@ -94,3 +94,25 @@ const styles = StyleSheet.create({
 });
 
 export default OfflineIndicator;
+
+export function useOfflineStatus() {
+  const [status, setStatus] = React.useState<OfflineQueueStatus | null>(null);
+
+  useEffect(() => {
+    offlineQueue.getStatus().then(setStatus);
+    const unsubscribe = offlineQueue.onStatusChange(setStatus);
+    return unsubscribe;
+  }, []);
+
+  return {
+    isOnline: status?.isOnline ?? true,
+    isSyncing: status?.isSyncing ?? false,
+    pendingCount: status?.pendingCount ?? 0,
+  };
+}
+
+export function HeaderOfflineStatus() {
+  const { isOnline } = useOfflineStatus();
+  if (isOnline) return null;
+  return <Text style={{ color: '#d32f2f', fontSize: 12, fontWeight: '600' }}>Offline</Text>;
+}
