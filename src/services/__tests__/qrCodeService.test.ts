@@ -1,6 +1,10 @@
-import { describe, it, expect } from 'vitest';
-
-import { generatePetQRCode, parseQRCodeData, validateQRCode } from '../qrCodeService';
+import {
+  generatePetQRCode,
+  generateQR,
+  getQRImageUrl,
+  parseQRCodeData,
+  validateQRCode,
+} from '../qrCodeService';
 
 // ✅ LOCAL TYPES (no dependency on service exports)
 type Species = 'dog' | 'cat' | 'bird';
@@ -43,6 +47,16 @@ describe('qrCodeService', () => {
 
     it('should throw for invalid id', async () => {
       await expect(generatePetQRCode({ ...mockPet, id: 'bad id' })).rejects.toThrow();
+    });
+  });
+
+  describe('generateQR', () => {
+    it('encodes pet data and builds an image URL', async () => {
+      const qrCode = await generateQR(mockPet);
+      const imageUrl = getQRImageUrl(qrCode);
+
+      expect(parseQRCodeData(qrCode).petId).toBe(mockPet.id);
+      expect(imageUrl).toContain(encodeURIComponent(qrCode));
     });
   });
 

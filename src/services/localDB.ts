@@ -1,7 +1,8 @@
 import * as SQLite from 'expo-sqlite';
+
 import { encrypt, decrypt } from '../utils/encryption';
 
-const db = SQLite.openDatabase('petchain.db');
+const db = SQLite.openDatabaseSync('petchain.db');
 
 /**
  * Helper to safely decrypt data, falling back to original data if decryption fails.
@@ -10,11 +11,11 @@ const db = SQLite.openDatabase('petchain.db');
 async function safeDecrypt<T = string>(
   data: string,
   purpose: string,
-  parseJson: boolean = false
+  parseJson: boolean = false,
 ): Promise<T> {
   try {
     return await decrypt<T>(data, purpose, parseJson);
-  } catch (error) {
+  } catch {
     // If decryption fails, it might be unencrypted legacy data
     if (parseJson) {
       try {
@@ -28,39 +29,44 @@ async function safeDecrypt<T = string>(
   }
 }
 
-function executeSql(sql: string, params: any[] = []): Promise<SQLite.SQLResultSet> {
-  return new Promise((resolve, reject) => {
-    db.transaction((tx) => {
-      tx.executeSql(
-        sql,
-        params,
-        (_tx, result) => resolve(result),
-        (_tx, err) => {
-          reject(err);
-          return false;
-        },
-      );
-    });
-  });
+export async function executeSql(
+  sql: string,
+  params: SQLite.SQLiteBindParams = [],
+): Promise<SQLite.SQLiteRunResult> {
+  return db.runAsync(sql, params);
 }
 
 async function init(): Promise<void> {
   // Key-value store for misc JSON blobs
-  await executeSql(
+  await db.execAsync(
     `CREATE TABLE IF NOT EXISTS kv_store (key TEXT PRIMARY KEY NOT NULL, value TEXT)`,
   );
 
   // Structured tables for medications and dose logs
-  await executeSql(
+  await db.execAsync(
     `CREATE TABLE IF NOT EXISTS medications (id TEXT PRIMARY KEY NOT NULL, data TEXT NOT NULL)`,
   );
 
-  await executeSql(
+  await db.execAsync(
     `CREATE TABLE IF NOT EXISTS dose_logs (id TEXT PRIMARY KEY NOT NULL, medication_id TEXT, taken_at TEXT, skipped INTEGER, notes TEXT, data TEXT NOT NULL)`,
   );
 
-  await executeSql(
+  await db.execAsync(
     `CREATE TABLE IF NOT EXISTS health_metrics (id TEXT PRIMARY KEY NOT NULL, pet_id TEXT NOT NULL, recorded_at TEXT NOT NULL, data TEXT NOT NULL)`,
+  );
+
+  // Appointments table – indexed by pet_id and scheduled_at for conflict lookups
+  await db.execAsync(
+    `CREATE TABLE IF NOT EXISTS appointments (
+      id TEXT PRIMARY KEY NOT NULL,
+      pet_id TEXT NOT NULL,
+      scheduled_at TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'PENDING',
+      data TEXT NOT NULL
+    )`,
+  );
+  await db.execAsync(
+    `CREATE INDEX IF NOT EXISTS idx_appointments_pet_scheduled ON appointments (pet_id, scheduled_at)`,
   );
 }
 
@@ -69,36 +75,43 @@ init().catch(() => {});
 
 // KV helpers (compat with AsyncStorage-like API)
 export async function getItem(key: string): Promise<string | null> {
-  const res = await executeSql(`SELECT value FROM kv_store WHERE key = ? LIMIT 1`, [key]);
-  if (res.rows.length === 0) return null;
-  const value = res.rows.item(0).value as string;
-  return await safeDecrypt(value, `localdb_kv_${key}`);
+  const row = await db.getFirstAsync<{ value: string }>(
+    `SELECT value FROM kv_store WHERE key = ? LIMIT 1`,
+    [key],
+  );
+  if (!row) return null;
+  return await safeDecrypt(row.value, `localdb_kv_${key}`);
 }
 
 export async function setItem(key: string, value: string): Promise<void> {
   const encryptedValue = await encrypt(value, `localdb_kv_${key}`);
-  await executeSql(`INSERT OR REPLACE INTO kv_store (key, value) VALUES (?, ?)`, [key, encryptedValue]);
+  await db.runAsync(`INSERT OR REPLACE INTO kv_store (key, value) VALUES (?, ?)`, [
+    key,
+    encryptedValue,
+  ]);
 }
 
 export async function removeItem(key: string): Promise<void> {
-  await executeSql(`DELETE FROM kv_store WHERE key = ?`, [key]);
+  await db.runAsync(`DELETE FROM kv_store WHERE key = ?`, [key]);
 }
 
 export async function multiGet(keys: string[]): Promise<Array<[string, string | null]>> {
   if (keys.length === 0) return [];
   const placeholders = keys.map(() => '?').join(',');
-  const res = await executeSql(`SELECT key, value FROM kv_store WHERE key IN (${placeholders})`, keys);
+  const rows = await db.getAllAsync<{ key: string; value: string }>(
+    `SELECT key, value FROM kv_store WHERE key IN (${placeholders})`,
+    keys,
+  );
   const map: Record<string, string> = {};
-  for (let i = 0; i < res.rows.length; i++) {
-    const row = res.rows.item(i);
+  for (const row of rows) {
     map[row.key] = row.value;
   }
-  
+
   return await Promise.all(
     keys.map(async (k) => {
       const val = map[k];
       return [k, val ? await safeDecrypt(val, `localdb_kv_${k}`) : null] as [string, string | null];
-    })
+    }),
   );
 }
 
@@ -107,30 +120,23 @@ export async function multiSet(items: Array<[string, string]>): Promise<void> {
     items.map(async ([k, v]) => {
       const encryptedValue = await encrypt(v, `localdb_kv_${k}`);
       return [k, encryptedValue] as [string, string];
-    })
+    }),
   );
 
-  await new Promise<void>((resolve, reject) => {
-    db.transaction((tx) => {
-      try {
-        for (const [k, v] of encryptedItems) {
-          tx.executeSql(`INSERT OR REPLACE INTO kv_store (key, value) VALUES (?, ?)`, [k, v]);
-        }
-        resolve();
-      } catch (e) {
-        reject(e);
-      }
-    });
+  await db.withTransactionAsync(async () => {
+    for (const [k, v] of encryptedItems) {
+      await db.runAsync(`INSERT OR REPLACE INTO kv_store (key, value) VALUES (?, ?)`, [k, v]);
+    }
   });
 }
 
 // Medications CRUD
-export async function getAllMedications(): Promise<any[]> {
-  const res = await executeSql(`SELECT data FROM medications`);
-  const out: any[] = [];
-  for (let i = 0; i < res.rows.length; i++) {
+export async function getAllMedications<T = unknown>(): Promise<T[]> {
+  const rows = await db.getAllAsync<{ data: string }>(`SELECT data FROM medications`);
+  const out: T[] = [];
+  for (const row of rows) {
     try {
-      const decrypted = await safeDecrypt(res.rows.item(i).data, 'localdb_medications', true);
+      const decrypted = await safeDecrypt<T>(row.data, 'localdb_medications', true);
       out.push(decrypted);
     } catch {
       // ignore bad rows
@@ -139,67 +145,171 @@ export async function getAllMedications(): Promise<any[]> {
   return out;
 }
 
-export async function upsertMedication(med: any): Promise<void> {
+export async function upsertMedication<T extends { id: string }>(med: T): Promise<void> {
   const encryptedData = await encrypt(med, 'localdb_medications');
-  await executeSql(`INSERT OR REPLACE INTO medications (id, data) VALUES (?, ?)`, [med.id, encryptedData]);
-}
-
-export async function deleteMedicationById(id: string): Promise<void> {
-  await executeSql(`DELETE FROM medications WHERE id = ?`, [id]);
-}
-
-// Dose logs
-export async function getDoseLogs(): Promise<any[]> {
-  const res = await executeSql(`SELECT data FROM dose_logs ORDER BY taken_at ASC`);
-  const out: any[] = [];
-  for (let i = 0; i < res.rows.length; i++) {
-    try {
-      const decrypted = await safeDecrypt(res.rows.item(i).data, 'localdb_dose_logs', true);
-      out.push(decrypted);
-    } catch {
-      // ignore
-    }
-  }
-  return out;
-}
-
-export async function addDoseLog(log: any): Promise<void> {
-  const encryptedData = await encrypt(log, 'localdb_dose_logs');
-  await executeSql(
-    `INSERT OR REPLACE INTO dose_logs (id, medication_id, taken_at, skipped, notes, data) VALUES (?, ?, ?, ?, ?, ?)`,
-    [log.id, log.medicationId ?? null, log.takenAt ?? null, log.skipped ? 1 : 0, log.notes ?? null, encryptedData],
-  );
-}
-
-export async function getHealthMetricsByPetId(petId: string): Promise<any[]> {
-  const res = await executeSql(
-    `SELECT data FROM health_metrics WHERE pet_id = ? ORDER BY recorded_at ASC`,
-    [petId],
-  );
-  const out: any[] = [];
-  for (let i = 0; i < res.rows.length; i++) {
-    try {
-      const decrypted = await safeDecrypt(res.rows.item(i).data, 'localdb_health_metrics', true);
-      out.push(decrypted);
-    } catch {
-      // ignore
-    }
-  }
-  return out;
-}
-
-export async function upsertHealthMetric(entry: { id: string; petId: string; recordedAt: string; [k: string]: unknown }): Promise<void> {
-  const encryptedData = await encrypt(entry, 'localdb_health_metrics');
-  await executeSql(`INSERT OR REPLACE INTO health_metrics (id, pet_id, recorded_at, data) VALUES (?, ?, ?, ?)`, [
-    entry.id,
-    entry.petId,
-    entry.recordedAt,
+  await db.runAsync(`INSERT OR REPLACE INTO medications (id, data) VALUES (?, ?)`, [
+    med.id,
     encryptedData,
   ]);
 }
 
+export async function deleteMedicationById(id: string): Promise<void> {
+  await db.runAsync(`DELETE FROM medications WHERE id = ?`, [id]);
+}
+
+// Dose logs
+export async function getDoseLogs<T = unknown>(): Promise<T[]> {
+  const rows = await db.getAllAsync<{ data: string }>(
+    `SELECT data FROM dose_logs ORDER BY taken_at ASC`,
+  );
+  const out: T[] = [];
+  for (const row of rows) {
+    try {
+      const decrypted = await safeDecrypt<T>(row.data, 'localdb_dose_logs', true);
+      out.push(decrypted);
+    } catch {
+      // ignore
+    }
+  }
+  return out;
+}
+
+export async function addDoseLog<
+  T extends {
+    id: string;
+    medicationId?: string;
+    takenAt?: string;
+    skipped?: boolean;
+    notes?: string;
+  },
+>(log: T): Promise<void> {
+  const encryptedData = await encrypt(log, 'localdb_dose_logs');
+  await db.runAsync(
+    `INSERT OR REPLACE INTO dose_logs (id, medication_id, taken_at, skipped, notes, data) VALUES (?, ?, ?, ?, ?, ?)`,
+    [
+      log.id,
+      log.medicationId ?? null,
+      log.takenAt ?? null,
+      log.skipped ? 1 : 0,
+      log.notes ?? null,
+      encryptedData,
+    ],
+  );
+}
+
+export async function clearDoseLogs(): Promise<void> {
+  await db.runAsync(`DELETE FROM dose_logs`);
+}
+
+export async function getHealthMetricsByPetId(petId: string): Promise<unknown[]> {
+  const rows = await db.getAllAsync<{ data: string }>(
+    `SELECT data FROM health_metrics WHERE pet_id = ? ORDER BY recorded_at ASC`,
+    [petId],
+  );
+  const out: unknown[] = [];
+  for (const row of rows) {
+    try {
+      const decrypted = await safeDecrypt(row.data, 'localdb_health_metrics', true);
+      out.push(decrypted);
+    } catch {
+      // ignore
+    }
+  }
+  return out;
+}
+
+export async function upsertHealthMetric(entry: {
+  id: string;
+  petId: string;
+  recordedAt: string;
+  [k: string]: unknown;
+}): Promise<void> {
+  const encryptedData = await encrypt(entry, 'localdb_health_metrics');
+  await db.runAsync(
+    `INSERT OR REPLACE INTO health_metrics (id, pet_id, recorded_at, data) VALUES (?, ?, ?, ?)`,
+    [entry.id, entry.petId, entry.recordedAt, encryptedData],
+  );
+}
+
 export async function deleteHealthMetricById(id: string): Promise<void> {
-  await executeSql(`DELETE FROM health_metrics WHERE id = ?`, [id]);
+  await db.runAsync(`DELETE FROM health_metrics WHERE id = ?`, [id]);
+}
+
+// ─── Appointments CRUD ────────────────────────────────────────────────────────
+
+export async function getAllAppointmentsByPetId<T = unknown>(petId: string): Promise<T[]> {
+  const rows = await db.getAllAsync<{ data: string }>(
+    `SELECT data FROM appointments WHERE pet_id = ? ORDER BY scheduled_at ASC`,
+    [petId],
+  );
+  const out: T[] = [];
+  for (const row of rows) {
+    try {
+      const decrypted = await safeDecrypt<T>(row.data, 'localdb_appointments', true);
+      out.push(decrypted);
+    } catch {
+      // ignore bad rows
+    }
+  }
+  return out;
+}
+
+export async function getAllLocalAppointments<T = unknown>(): Promise<T[]> {
+  const rows = await db.getAllAsync<{ data: string }>(
+    `SELECT data FROM appointments ORDER BY scheduled_at ASC`,
+  );
+  const out: T[] = [];
+  for (const row of rows) {
+    try {
+      const decrypted = await safeDecrypt<T>(row.data, 'localdb_appointments', true);
+      out.push(decrypted);
+    } catch {
+      // ignore bad rows
+    }
+  }
+  return out;
+}
+
+/**
+ * Fetch appointments for a pet within a specific time window (for conflict detection).
+ * windowStart / windowEnd are ISO strings.
+ */
+export async function getAppointmentsInWindow<T = unknown>(
+  petId: string,
+  windowStart: string,
+  windowEnd: string,
+): Promise<T[]> {
+  const rows = await db.getAllAsync<{ data: string }>(
+    `SELECT data FROM appointments
+     WHERE pet_id = ? AND scheduled_at >= ? AND scheduled_at <= ?
+     AND status != 'CANCELLED'
+     ORDER BY scheduled_at ASC`,
+    [petId, windowStart, windowEnd],
+  );
+  const out: T[] = [];
+  for (const row of rows) {
+    try {
+      const decrypted = await safeDecrypt<T>(row.data, 'localdb_appointments', true);
+      out.push(decrypted);
+    } catch {
+      // ignore bad rows
+    }
+  }
+  return out;
+}
+
+export async function upsertAppointment<T extends { id: string; petId: string; date: string; status?: string }>(
+  appt: T,
+): Promise<void> {
+  const encryptedData = await encrypt(appt, 'localdb_appointments');
+  await db.runAsync(
+    `INSERT OR REPLACE INTO appointments (id, pet_id, scheduled_at, status, data) VALUES (?, ?, ?, ?, ?)`,
+    [appt.id, appt.petId, appt.date, appt.status ?? 'PENDING', encryptedData],
+  );
+}
+
+export async function deleteAppointmentById(id: string): Promise<void> {
+  await db.runAsync(`DELETE FROM appointments WHERE id = ?`, [id]);
 }
 
 export default {
@@ -216,4 +326,9 @@ export default {
   getHealthMetricsByPetId,
   upsertHealthMetric,
   deleteHealthMetricById,
+  getAllAppointmentsByPetId,
+  getAllLocalAppointments,
+  getAppointmentsInWindow,
+  upsertAppointment,
+  deleteAppointmentById,
 };

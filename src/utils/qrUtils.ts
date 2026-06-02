@@ -1,6 +1,5 @@
-import { getItem, setItem, removeItem } from '../services/localDB';
-
 import type { Pet } from '../models/Pet';
+import { getItem, setItem, removeItem } from '../services/localDB';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -117,10 +116,7 @@ export const getCachedQRPayload = async (petId: string): Promise<string | null> 
 export const clearCachedQR = async (petId: string): Promise<void> => {
   await removeItem(`${QR_CACHE_PREFIX}${petId}`);
   const index = await getCacheIndex();
-  await setItem(
-    QR_CACHE_INDEX_KEY,
-    JSON.stringify(index.filter((id) => id !== petId)),
-  );
+  await setItem(QR_CACHE_INDEX_KEY, JSON.stringify(index.filter((id) => id !== petId)));
 };
 
 /**

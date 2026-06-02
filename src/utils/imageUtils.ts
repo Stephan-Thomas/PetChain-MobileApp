@@ -1,6 +1,11 @@
 import { Platform } from 'react-native';
 import { launchImageLibrary } from 'react-native-image-picker';
 import ImageResizer from 'react-native-image-resizer';
+import { PermissionsAndroid, Platform } from 'react-native';
+import { launchImageLibrary } from 'react-native-image-picker';
+import ImageResizer from 'react-native-image-resizer';
+
+import { requestAndroidPermission } from '../services/permissionService';
 
 export interface ImagePickerResult {
   uri: string;
@@ -23,6 +28,23 @@ export interface ImageUploadResult {
 
 export const pickImage = async (): Promise<ImagePickerResult | null> => {
   try {
+    if (Platform.OS === 'android') {
+      const mediaPermission =
+        (PermissionsAndroid.PERMISSIONS as Record<string, string>).READ_MEDIA_IMAGES ??
+        PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE;
+
+      const granted = await requestAndroidPermission(mediaPermission, {
+        title: 'Photo Permission',
+        message: 'PetChain needs access to your photos to upload pet pictures.',
+        buttonPositive: 'Allow',
+        buttonNegative: 'Cancel',
+      });
+
+      if (!granted) {
+        return null;
+      }
+    }
+
     return new Promise((resolve) => {
       launchImageLibrary(
         { mediaType: 'photo', quality: 0.8, maxWidth: 2000, maxHeight: 2000 },
@@ -105,13 +127,7 @@ export const uploadToStorage = async (
       name: `pet-${petId}-${Date.now()}.jpg`,
     } as unknown as Blob);
 
-    if (thumbnailUri) {
-      formData.append('thumbnail', {
-        uri: Platform.OS === 'ios' ? thumbnailUri.replace('file://', '') : thumbnailUri,
-        type: 'image/jpeg',
-        name: `pet-${petId}-${Date.now()}-thumb.jpg`,
-      } as any);
-    }
+    // Note: thumbnail functionality removed to fix parameter mismatch
 
     const response = await fetch('/api/upload/pet-photo', {
       method: 'POST',
